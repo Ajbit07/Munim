@@ -127,3 +127,40 @@ def test_checker_reports_useful_location(tmp_path):
     violation = next(v for v in scan(tmp_path) if v.firewall == "PROOF_INDEPENDENCE")
     assert violation.module == "mfp.proof.engine"
     assert violation.line == 4
+
+
+# -- Block 1 additions: both directions, and production isolation --------
+
+
+def test_canary_generator_importing_fee_engine_is_caught(tmp_path):
+    _write(tmp_path, "mfp/data/generator/tariff.py", "from mfp.fees.engine import compute\n")
+    violations = scan(tmp_path)
+    assert any(v.firewall == "GENERATOR_INDEPENDENCE" for v in violations), (
+        "the generator borrowed the Fee Engine and the checker did not notice; "
+        "agreement between processor and auditor would be an echo"
+    )
+
+
+def test_canary_generator_importing_proof_is_caught(tmp_path):
+    _write(tmp_path, "mfp/data/generator/processor.py", "import mfp.proof.engine\n")
+    assert any(v.firewall == "GENERATOR_INDEPENDENCE" for v in scan(tmp_path))
+
+
+def test_canary_agent_importing_generator_is_caught(tmp_path):
+    _write(tmp_path, "mfp/agents/monitor.py", "from mfp.data.generator.world import build_worlds\n")
+    assert any(v.firewall == "PRODUCTION_ISOLATION" for v in scan(tmp_path))
+
+
+def test_canary_store_importing_evaluation_is_caught(tmp_path):
+    _write(tmp_path, "mfp/data/store.py", "from mfp.evaluation.harness import score\n")
+    assert any(v.firewall == "PRODUCTION_ISOLATION" for v in scan(tmp_path))
+
+
+def test_canary_generator_may_write_ground_truth(tmp_path):
+    _write(tmp_path, "mfp/data/generator/truth.py", 'TRUTH_FILE = "ground_truth.json"\n')
+    assert not any(v.firewall == "GROUND_TRUTH_ISOLATION" for v in scan(tmp_path))
+
+
+def test_canary_store_naming_ground_truth_is_caught(tmp_path):
+    _write(tmp_path, "mfp/data/store.py", 'HIDDEN = "_hidden/ground_truth.json"\n')
+    assert any(v.firewall == "GROUND_TRUTH_ISOLATION" for v in scan(tmp_path))

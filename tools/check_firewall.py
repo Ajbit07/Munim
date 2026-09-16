@@ -5,17 +5,21 @@ enforced here by AST analysis, and all three have canary tests in
 tests/test_firewalls.py that synthesize a violating module and assert that
 this checker catches it. A firewall nobody has seen fail is not a firewall.
 
-FIREWALL 1 -- PROOF INDEPENDENCE
-    mfp.proof.* may not import mfp.data.generator.*
+FIREWALL 1 -- PROOF INDEPENDENCE (both directions)
+    Production packages (proof, rules, fees, reconciliation, agents, workflow,
+    memory, network, api, data.store) may not import mfp.data.generator.* or
+    mfp.evaluation.*. And the generator may not import the production engines.
 
     If the Proof Engine could reach the generator's fee logic, it would be
     re-running the arithmetic that produced the data rather than independently
-    recomputing from published rules. The whole "0 false claims" result would
-    be circular. The Proof Engine reads config/*.json and observed artifacts,
-    and nothing else.
+    recomputing from published rules, and "0 false claims" would be circular.
+    The reverse direction matters too: if the generator borrowed the Fee
+    Engine, fixing a bug in one would silently fix the other, and agreement
+    between them would stop meaning anything.
 
 FIREWALL 2 -- GROUND TRUTH ISOLATION
-    Only mfp.evaluation.* may touch ground_truth.
+    Only mfp.evaluation.* (which reads it) and mfp.data.generator.* (which
+    writes it) may touch ground_truth.
 
     The production audit pipeline must never know what was planted. Any other
     module naming ground_truth -- by import, by string literal, by filename --
@@ -42,8 +46,22 @@ from pathlib import Path
 # -- configuration ------------------------------------------------------
 
 PROOF_PACKAGES = ("mfp.proof",)
+PRODUCTION_PACKAGES = (
+    "mfp.proof",
+    "mfp.rules",
+    "mfp.fees",
+    "mfp.reconciliation",
+    "mfp.agents",
+    "mfp.workflow",
+    "mfp.memory",
+    "mfp.network",
+    "mfp.api",
+    "mfp.data.store",
+)
 GENERATOR_PACKAGES = ("mfp.data.generator",)
 EVALUATION_PACKAGES = ("mfp.evaluation",)
+ENGINE_PACKAGES = ("mfp.proof", "mfp.rules", "mfp.fees", "mfp.reconciliation", "mfp.agents")
+TRUTH_PERMITTED_PACKAGES = EVALUATION_PACKAGES + GENERATOR_PACKAGES
 
 GROUND_TRUTH_TOKENS = ("ground_truth", "groundtruth")
 
@@ -98,26 +116,39 @@ def _imported_modules(tree: ast.AST) -> list[tuple[str, int]]:
 
 
 def check_proof_independence(mod: str, tree: ast.AST) -> list[Violation]:
-    if not _starts_with_any(mod, PROOF_PACKAGES):
-        return []
     out = []
-    for imported, line in _imported_modules(tree):
-        if _starts_with_any(imported, GENERATOR_PACKAGES):
-            out.append(
-                Violation(
-                    "PROOF_INDEPENDENCE",
-                    mod,
-                    line,
-                    f"imports {imported}. The Proof Engine must recompute from "
-                    "config rules and observed artifacts only, never from the "
-                    "generator that produced the data.",
+    if _starts_with_any(mod, PRODUCTION_PACKAGES):
+        label = "PROOF_INDEPENDENCE" if _starts_with_any(mod, PROOF_PACKAGES) else "PRODUCTION_ISOLATION"
+        for imported, line in _imported_modules(tree):
+            if _starts_with_any(imported, GENERATOR_PACKAGES + EVALUATION_PACKAGES):
+                out.append(
+                    Violation(
+                        label,
+                        mod,
+                        line,
+                        f"imports {imported}. Production code works from config rules "
+                        "and observed artifacts only, never from the generator that "
+                        "produced the data or the harness that scores it.",
+                    )
                 )
-            )
+    if _starts_with_any(mod, GENERATOR_PACKAGES):
+        for imported, line in _imported_modules(tree):
+            if _starts_with_any(imported, ENGINE_PACKAGES):
+                out.append(
+                    Violation(
+                        "GENERATOR_INDEPENDENCE",
+                        mod,
+                        line,
+                        f"imports {imported}. The generator's processor must be an "
+                        "independent implementation; sharing engine code would turn "
+                        "agreement between them into an echo.",
+                    )
+                )
     return out
 
 
 def check_ground_truth_isolation(mod: str, tree: ast.AST, source: str) -> list[Violation]:
-    if _starts_with_any(mod, EVALUATION_PACKAGES):
+    if _starts_with_any(mod, TRUTH_PERMITTED_PACKAGES):
         return []
     out = []
     for imported, line in _imported_modules(tree):
