@@ -19,7 +19,7 @@ from datetime import date, datetime, time, timedelta
 
 from mfp.data.generator.params import GenerationParams
 from mfp.data.generator.tariff import Charges
-from mfp.data.generator.truth import ExpectedAction, Lookalike
+from mfp.data.generator.truth import FAULT_SUBTYPE, ExpectedAction, Fault, Lookalike, PlantedDiscrepancy
 from mfp.data.generator.world import MerchantWorld, stream
 
 _LINE_TYPE = {"PAYMENT": "PAYMENT", "REFUND": "REFUND", "CHARGEBACK": "CHARGEBACK"}
@@ -52,6 +52,7 @@ class SettlementResult:
     lines: list[dict] = field(default_factory=list)
     credits: list[dict] = field(default_factory=list)
     lookalikes: list[Lookalike] = field(default_factory=list)
+    plants: list[PlantedDiscrepancy] = field(default_factory=list)
 
 
 def settle(
@@ -60,12 +61,15 @@ def settle(
     ledger: list[dict],
     charges: dict[str, Charges],
     settlement_rules: dict,
+    correct: dict[str, Charges] | None = None,
 ) -> SettlementResult:
     mid = world.merchant_id
     sla = world.agreement["settlement_sla_days"]
     cutoff = time.fromisoformat(settlement_rules["default_merchant_sla"]["cutoff_local_time"])
     slip_rng = stream(params, "settlement", mid)
     bank_rng = stream(params, "bank", mid)
+    grace = settlement_rules["lifecycle"]["unsettled_after_sla_days"]
+    correct = correct or {}
     result = SettlementResult()
 
     by_date: dict[date, list[tuple[dict, date]]] = defaultdict(list)
@@ -75,7 +79,42 @@ def settle(
         captured = datetime.fromisoformat(txn["captured_at"])
         cycle = cycle_date(captured, cutoff)
         settles_on = add_banking_days(cycle, sla)
-        slip = slip_rng.random() < params.late_settlement_probability  # drawn for every txn
+        # Every draw happens for every transaction, so the stream never shifts.
+        slip = slip_rng.random() < params.late_settlement_probability
+        drop_draw = slip_rng.random()
+        dup_draw = slip_rng.random()
+        on = captured.date()
+
+        drop = world.active_fault(Fault.DROPPED_FROM_BATCH, on)
+        if (
+            txn["kind"] == "PAYMENT" and drop and drop_draw < drop.params["probability"]
+            and add_banking_days(settles_on, grace) <= params.as_of
+        ):
+            owed = txn["amount_paise"] - correct.get(txn["txn_id"], Charges()).total
+            dtype, subtype = FAULT_SUBTYPE[Fault.DROPPED_FROM_BATCH]
+            result.plants.append(PlantedDiscrepancy(
+                plant_id=f"PLT-{txn['txn_id']}-SETTLEMENT", merchant_id=mid, fault=Fault.DROPPED_FROM_BATCH,
+                discrepancy_type=dtype, subtype=subtype, expected_action=ExpectedAction.CLAIM,
+                txn_id=txn["txn_id"], captured_on=on, component="SETTLEMENT", amount_paise=owed,
+                charged_paise=0, correct_paise=owed,  # nothing settled; owed is the correct net
+                rule_ids=("RECON.PAYMENT.SETTLED_ONCE",),
+            ))
+            continue
+
+        dup = world.active_fault(Fault.DUPLICATE_REFUND_DEBIT, on)
+        if txn["kind"] == "REFUND" and dup and dup_draw < dup.params["probability"]:
+            again_on = add_banking_days(settles_on, 1)
+            if again_on <= params.as_of:
+                by_date[again_on].append((txn, cycle))
+                dtype, subtype = FAULT_SUBTYPE[Fault.DUPLICATE_REFUND_DEBIT]
+                result.plants.append(PlantedDiscrepancy(
+                    plant_id=f"PLT-{txn['txn_id']}-REFUND_DEBIT", merchant_id=mid,
+                    fault=Fault.DUPLICATE_REFUND_DEBIT, discrepancy_type=dtype, subtype=subtype,
+                    expected_action=ExpectedAction.CLAIM, txn_id=txn["txn_id"], captured_on=on,
+                    component="REFUND_DEBIT", amount_paise=txn["amount_paise"],
+                    charged_paise=2 * txn["amount_paise"], correct_paise=txn["amount_paise"],
+                    rule_ids=("RECON.REFUND.SINGLE_DEBIT",),
+                ))
         if txn["kind"] == "PAYMENT" and slip:
             settles_on = add_banking_days(settles_on, 1)
             if settles_on <= params.as_of:
@@ -102,8 +141,12 @@ def settle(
                                Charges(), ref_batch_id=carry_from))
             carry, carry_from = 0, None
 
+        seen_in_batch: set[str] = set()
         for txn, _cycle in entries:
             kind = txn["kind"]
+            if txn["txn_id"] in seen_in_batch:
+                continue
+            seen_in_batch.add(txn["txn_id"])
             gross = txn["amount_paise"] if kind == "PAYMENT" else -txn["amount_paise"]
             deductions = charges.get(txn["txn_id"], Charges()) if kind == "PAYMENT" else Charges()
             lines.append(_line(batch_id, mid, len(lines) + 1, _LINE_TYPE[kind], txn, gross, deductions))

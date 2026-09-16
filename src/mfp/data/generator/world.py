@@ -159,9 +159,62 @@ def build_worlds(params: GenerationParams, tariff: ProcessorTariff) -> list[Merc
         world = MerchantWorld(merchant, agreement, txn_per_day=txn_per_day,
                               amount_mu_rupees=mu, amount_sigma=sigma)
         world.faults = assign_faults(params, world, tariff, is_hero=is_hero)
-        world.snapshots = build_snapshots(world)
         worlds.append(world)
+
+    if params.leakage:
+        ensure_class_coverage(params, worlds, tariff)
+    for world in worlds:
+        world.snapshots = build_snapshots(world)
     return worlds
+
+
+_COVERAGE: tuple[tuple[Fault, str], ...] = (
+    (Fault.MCC_MISCONFIG, "Processor pricing MCC defaulted when the RuPay-CC-on-UPI MDR table was loaded"),
+    (Fault.CONTRACT_RATE_DRIFT, "Credit card rate raised above agreement without amendment"),
+    (Fault.UPI_SMALL_MDR, "A fraction of bank-account UPI transactions mis-tagged as debit card"),
+    (Fault.GST_ON_EXEMPT_CARD, "GST levied on MDR for card settlements up to Rs 2,000 despite the PA exemption"),
+    (Fault.GST_TAX_ON_TAX, "GST computed on MDR-plus-GST instead of on MDR alone"),
+    (Fault.TAX_ON_NON_ECO, "Merchant flagged as e-commerce participant; TCS and 194-O TDS deducted from a plain PA flow"),
+    (Fault.DUPLICATE_REFUND_DEBIT, "Refund debits re-sent in the following settlement run after a retry"),
+    (Fault.DROPPED_FROM_BATCH, "Payments captured during batch-close dropped from the settlement file"),
+)
+
+
+def ensure_class_coverage(params: GenerationParams, worlds: list[MerchantWorld], tariff: ProcessorTariff) -> None:
+    """Coverage rule: every discrepancy class must exist at full fidelity.
+
+    If probability alone left a fault class with no full-fidelity, non-hero
+    merchant, assign it to the first eligible cohort merchant from mid-window.
+    This is a documented generation rule (docs/DATA.md), applied identically
+    for every seed, so evaluation always exercises all six classes.
+    """
+    cohort = [w for w in worlds[1:] if w.is_full]
+    if not cohort:
+        return
+    mid_window = params.window_start + (params.as_of - params.window_start) // 2
+    default_rate, _ = tariff.rupay_cc_default
+    for fault, cause in _COVERAGE:
+        if any(w.active_fault(fault, params.as_of) for w in cohort):
+            continue
+        for world in cohort:
+            m = world.merchant
+            if fault is Fault.TAX_ON_NON_ECO and m["is_ecommerce_participant"]:
+                continue
+            if fault is Fault.MCC_MISCONFIG and not tariff.rupay_cc_rate(m["registered_mcc"])[0].value < default_rate.value:
+                continue
+            fparams = {
+                Fault.MCC_MISCONFIG: {"pricing_mcc": "5999"},
+                Fault.CONTRACT_RATE_DRIFT: {"drift_bps": 25},
+                Fault.UPI_SMALL_MDR: {"fraction": params.upi_small_mdr_fraction},
+                Fault.DUPLICATE_REFUND_DEBIT: {"probability": params.duplicate_refund_probability},
+                Fault.DROPPED_FROM_BATCH: {"probability": params.dropped_payment_probability},
+            }.get(fault, {})
+            start = RUPAY_CC_TABLE_LOADED_ON if fault is Fault.MCC_MISCONFIG else mid_window
+            world.faults = sorted(
+                world.faults + [FaultProfile(world.merchant_id, fault, start, cause + " (coverage rule)", fparams)],
+                key=lambda f: (f.active_from, f.fault),
+            )
+            break
 
 
 # -- faults -------------------------------------------------------------
@@ -181,17 +234,21 @@ def assign_faults(
     mid = world.merchant_id
     start, end = params.window_start, params.as_of
 
-    draws = {name: rng.random() for name in (
-        "acq_b", "acq_c", "mcc", "drift", "small", "ppi")}
+    names = ("acq_b", "acq_c", "mcc", "drift", "small", "ppi",
+             "gst_exempt", "tax_on_tax", "tax", "dup", "drop")
+    draws = {name: rng.random() for name in names}
     # Random faults start in the first three quarters of the window, so a fault
     # always has enough history behind it to be observable.
     latest_start = start + (end - start) * 3 // 4
-    dates = {name: _random_date(rng, start, latest_start) for name in ("drift", "small", "ppi")}
+    dates = {name: _random_date(rng, start, latest_start) for name in names}
     drift_bps = rng.choice((20, 25, 30))
 
     faults: list[FaultProfile] = []
     if not params.leakage:
         return faults
+
+    def add(fault: Fault, on: date, cause: str, scope: str | None = None, **fparams) -> None:
+        faults.append(FaultProfile(mid, fault, on, cause, dict(fparams), systemic_scope=scope))
 
     registered_rate, _ = tariff.rupay_cc_rate(m["registered_mcc"])
     default_rate, _ = tariff.rupay_cc_default
@@ -199,60 +256,64 @@ def assign_faults(
 
     if is_hero:
         hero = params.hero
-        faults.append(FaultProfile(
-            mid, Fault.MCC_MISCONFIG, hero.mcc_misconfig_from,
+        add(Fault.MCC_MISCONFIG, hero.mcc_misconfig_from,
             f"Processor pricing MCC set to {hero.misconfigured_mcc} (default band) instead of "
             f"registered {hero.registered_mcc} when the RuPay-CC-on-UPI MDR table was loaded",
-            {"pricing_mcc": hero.misconfigured_mcc},
-        ))
-        faults.append(FaultProfile(
-            mid, Fault.CONTRACT_RATE_DRIFT, hero.contract_drift_from,
+            pricing_mcc=hero.misconfigured_mcc)
+        add(Fault.CONTRACT_RATE_DRIFT, hero.contract_drift_from,
             f"Credit card rate on processor rate card raised {hero.contract_drift_bps} bps "
             "above the signed agreement without an amendment",
-            {"drift_bps": hero.contract_drift_bps},
-        ))
-        faults.append(FaultProfile(
-            mid, Fault.PPI_PASSTHROUGH, hero.ppi_passthrough_from,
-            "Wallet-on-UPI interchange passed through to merchant as MDR; contractual basis unknown",
-        ))
+            drift_bps=hero.contract_drift_bps)
+        add(Fault.PPI_PASSTHROUGH, hero.ppi_passthrough_from,
+            "Wallet-on-UPI interchange passed through to merchant as MDR; contractual basis unknown")
+        add(Fault.DUPLICATE_REFUND_DEBIT, hero.duplicate_refund_from,
+            "Refund debits re-sent in the following settlement run after a retry",
+            probability=params.duplicate_refund_probability)
+        add(Fault.DROPPED_FROM_BATCH, hero.dropped_from_batch_from,
+            "Payments captured during batch-close dropped from the settlement file",
+            probability=hero.dropped_payment_probability)
     else:
         if mcc_misconfig_matters and draws["mcc"] < probs.mcc_misconfig:
-            faults.append(FaultProfile(
-                mid, Fault.MCC_MISCONFIG, RUPAY_CC_TABLE_LOADED_ON,
+            add(Fault.MCC_MISCONFIG, RUPAY_CC_TABLE_LOADED_ON,
                 f"Processor pricing MCC defaulted instead of registered {m['registered_mcc']} "
-                "when the RuPay-CC-on-UPI MDR table was loaded",
-                {"pricing_mcc": "5999"},
-            ))
+                "when the RuPay-CC-on-UPI MDR table was loaded", pricing_mcc="5999")
         if draws["drift"] < probs.contract_rate_drift:
-            faults.append(FaultProfile(
-                mid, Fault.CONTRACT_RATE_DRIFT, dates["drift"],
+            add(Fault.CONTRACT_RATE_DRIFT, dates["drift"],
                 f"Credit card rate raised {drift_bps} bps above agreement without amendment",
-                {"drift_bps": drift_bps},
-            ))
+                drift_bps=drift_bps)
         if draws["small"] < probs.upi_small_mdr:
-            faults.append(FaultProfile(
-                mid, Fault.UPI_SMALL_MDR, dates["small"],
+            add(Fault.UPI_SMALL_MDR, dates["small"],
                 "A fraction of bank-account UPI transactions mis-tagged as debit card and charged debit MDR",
-                {"fraction": params.upi_small_mdr_fraction},
-            ))
+                fraction=params.upi_small_mdr_fraction)
         if draws["ppi"] < probs.ppi_passthrough:
-            faults.append(FaultProfile(
-                mid, Fault.PPI_PASSTHROUGH, dates["ppi"],
-                "Wallet-on-UPI interchange passed through to merchant as MDR; contractual basis unknown",
-            ))
+            add(Fault.PPI_PASSTHROUGH, dates["ppi"],
+                "Wallet-on-UPI interchange passed through to merchant as MDR; contractual basis unknown")
+        if draws["gst_exempt"] < probs.gst_on_exempt_card:
+            add(Fault.GST_ON_EXEMPT_CARD, dates["gst_exempt"],
+                "GST levied on MDR for card settlements up to Rs 2,000 despite the PA exemption")
+        if draws["tax_on_tax"] < probs.gst_tax_on_tax:
+            add(Fault.GST_TAX_ON_TAX, dates["tax_on_tax"],
+                "GST computed on MDR-plus-GST instead of on MDR alone")
+        if not m["is_ecommerce_participant"] and draws["tax"] < probs.tax_on_non_eco:
+            add(Fault.TAX_ON_NON_ECO, dates["tax"],
+                "Merchant flagged as e-commerce participant; TCS and 194-O TDS deducted from a plain PA flow")
+        if draws["dup"] < probs.duplicate_refund_debit:
+            add(Fault.DUPLICATE_REFUND_DEBIT, dates["dup"],
+                "Refund debits re-sent in the following settlement run after a retry",
+                probability=params.duplicate_refund_probability)
+        if draws["drop"] < probs.dropped_from_batch:
+            add(Fault.DROPPED_FROM_BATCH, dates["drop"],
+                "Payments captured during batch-close dropped from the settlement file",
+                probability=params.dropped_payment_probability)
 
     if m["acquirer_id"] == "ACQ-B" and (is_hero or draws["acq_b"] < probs.acq_b_upi_mdr_early):
-        faults.append(FaultProfile(
-            mid, Fault.UPI_MDR_EARLY, ACQ_B_UPI_MDR_EARLY_FROM,
+        add(Fault.UPI_MDR_EARLY, ACQ_B_UPI_MDR_EARLY_FROM,
             "Acquirer enabled the NPCI 0.4% UPI P2M MDR ahead of its 15 Oct 2026 effective date",
-            systemic_scope="acquirer:ACQ-B",
-        ))
+            scope="acquirer:ACQ-B")
     if m["acquirer_id"] == "ACQ-C" and draws["acq_c"] < probs.acq_c_rupay_debit_as_debit:
-        faults.append(FaultProfile(
-            mid, Fault.RUPAY_DEBIT_AS_DEBIT, ACQ_C_RUPAY_DEBIT_FROM,
+        add(Fault.RUPAY_DEBIT_AS_DEBIT, ACQ_C_RUPAY_DEBIT_FROM,
             "Acquirer BIN table classifies RuPay debit as generic debit and applies debit MDR",
-            systemic_scope="acquirer:ACQ-C",
-        ))
+            scope="acquirer:ACQ-C")
     return sorted(faults, key=lambda f: (f.active_from, f.fault))
 
 

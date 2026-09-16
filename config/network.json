@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Network pattern engine settings. In production the salt is a secret held by the network operator; it is in the repo only so the synthetic demo is reproducible.",
+  "emitter_salt": "mfp-network-demo-salt-v1",
+  "k_anonymity": 5,
+  "impact_bucket_paise": 10000
+}

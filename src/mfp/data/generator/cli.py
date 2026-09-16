@@ -20,6 +20,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from mfp.data.generator.network import background_signatures
 from mfp.data.generator.params import GENERATOR_VERSION, GenerationParams
 from mfp.data.generator.processor import charge_ledger
 from mfp.data.generator.settlement import settle
@@ -38,6 +39,7 @@ OBSERVED_FILES = (
     "settlement_batches.jsonl",
     "settlement_lines.jsonl",
     "bank_credits.jsonl",
+    "network_signatures.jsonl",
 )
 
 
@@ -73,6 +75,7 @@ def dataset_name(params: GenerationParams) -> str:
 def generate(params: GenerationParams, config_dir: Path = DEFAULT_CONFIG_DIR) -> Path:
     fee_rules = json.loads((config_dir / "fee_rules.json").read_text(encoding="utf-8"))
     settlement_rules = json.loads((config_dir / "settlement_rules.json").read_text(encoding="utf-8"))
+    network = json.loads((config_dir / "network.json").read_text(encoding="utf-8"))
     tariff = ProcessorTariff(fee_rules)
 
     out = params.out_dir / dataset_name(params)
@@ -92,14 +95,18 @@ def generate(params: GenerationParams, config_dir: Path = DEFAULT_CONFIG_DIR) ->
             continue
         ledger = build_ledger(params, world)
         charged = charge_ledger(params, world, ledger, tariff)
-        settled = settle(params, world, ledger, charged.charges, settlement_rules)
+        settled = settle(params, world, ledger, charged.charges, settlement_rules, charged.correct)
         rows["transactions.jsonl"].extend(ledger)
         rows["settlement_batches.jsonl"].extend(settled.batches)
         rows["settlement_lines.jsonl"].extend(settled.lines)
         rows["bank_credits.jsonl"].extend(settled.credits)
         truth.plants.extend(charged.plants)
+        truth.plants.extend(settled.plants)
         truth.lookalikes.extend(charged.lookalikes)
         truth.lookalikes.extend(settled.lookalikes)
+
+    rows["network_signatures.jsonl"] = background_signatures(params, worlds, network["emitter_salt"])
+    truth.plants.sort(key=lambda p: p.plant_id)
 
     manifest = {
         "dataset": out.name,

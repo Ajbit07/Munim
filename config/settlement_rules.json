@@ -2,7 +2,6 @@
   "schema_version": "1.0.0",
   "rule_set_id": "settlement_rules",
   "description": "Settlement lifecycle rules. IMPORTANT: the RBI (Regulation of Payment Aggregators) Directions, 2025 replaced the rigid T+1 / Tn+1 mandate with commercially negotiated timelines that need only be fair, equitable and transparently disclosed. There is therefore NO regulatory T+N to test against. The settlement SLA is a per-merchant CONTRACT field, and discrepancy class L6 is proven against the merchant's own disclosed timeline, not against a regulation.",
-
   "source": {
     "authority": "RBI",
     "document": "Reserve Bank of India (Regulation of Payment Aggregators) Directions, 2025. Settlement credits to merchants may be effected per the PA-merchant agreement provided terms are fair, equitable and transparently disclosed. Escrow segregation and pre-settlement merchant listing remain mandatory.",
@@ -11,7 +10,6 @@
   },
   "confidence": "HIGH",
   "verification_status": "SECONDARY",
-
   "default_merchant_sla": {
     "rule_id": "SLA.DEFAULT.T_PLUS_1",
     "settlement_days": 1,
@@ -20,13 +18,11 @@
     "timezone": "Asia/Kolkata",
     "notes": "Used only when a merchant record does not carry its own contracted SLA. Applied as a fallback, never as a regulatory floor."
   },
-
   "lifecycle": {
     "awaiting_cycle_grace_days": 0,
     "unsettled_after_sla_days": 2,
     "explanation": "A captured transaction sits in AWAITING_CYCLE until its contracted settlement day passes. Only after unsettled_after_sla_days beyond that date, with no settlement line found across ALL subsequent batches, may it be classified L6. This separation is what prevents a not-yet-due transaction from being filed as an unsettled one."
   },
-
   "failed_transaction_tat": {
     "rule_id": "TAT.RBI.2019",
     "source_document": "RBI DPSS.CO.PD No.629/02.01.014/2019-20 dated 20 Sep 2019, Harmonisation of Turn Around Time",
@@ -34,9 +30,11 @@
     "confidence": "HIGH",
     "verification_status": "SECONDARY"
   },
-
   "holiday_calendar": {
-    "weekend_days": ["Saturday", "Sunday"],
+    "weekend_days": [
+      "Saturday",
+      "Sunday"
+    ],
     "notes": "Banking-day arithmetic excludes weekends. A national holiday list is loaded per generated dataset year; absent an entry the day counts as a banking day.",
     "confidence": "LOW",
     "verification_status": "ASSUMED",
@@ -44,5 +42,23 @@
       "Real settlement calendars vary by sponsor bank and by RTGS/NEFT availability.",
       "We model weekends only, plus an explicit per-dataset holiday list. A case whose classification flips depending on a single holiday assumption must escalate."
     ]
-  }
+  },
+  "reconciliation_invariants": [
+    {
+      "rule_id": "RECON.REFUND.SINGLE_DEBIT",
+      "statement": "A refund or chargeback transaction is debited from the merchant's settlement exactly once.",
+      "discrepancy_type": "L5_ORPHAN_REFUND",
+      "basis": "Accounting invariant: a single customer refund creates a single merchant liability. A second debit for the same refund id has no corresponding refund event.",
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY"
+    },
+    {
+      "rule_id": "RECON.PAYMENT.SETTLED_ONCE",
+      "statement": "A successful captured payment settles in exactly one batch within its contracted settlement timeline plus grace.",
+      "discrepancy_type": "L6_UNSETTLED_TRANSACTION",
+      "basis": "RBI (Regulation of Payment Aggregators) Directions, 2025 require settlement per the disclosed PA-merchant agreement; the agreement's settlement_sla_days governs the due date.",
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY"
+    }
+  ]
 }

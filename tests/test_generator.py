@@ -169,14 +169,14 @@ def test_capture_after_cutoff_belongs_to_the_next_cycle(leaky):
     assert checked > 0
 
 
-def test_failed_payments_never_settle_and_successful_ones_settle_once(leaky):
+def test_failed_payments_never_settle_and_successful_ones_settle_once(clean):
     counts: dict[str, int] = defaultdict(int)
-    for line in leaky.settlement_lines:
+    for line in clean.settlement_lines:
         if line.txn_id:
             counts[line.txn_id] += 1
     assert all(n == 1 for n in counts.values())
     horizon = SMALL.as_of - timedelta(days=7)
-    for txn in leaky.transactions:
+    for txn in clean.transactions:
         if txn.status == "FAILED":
             assert txn.txn_id not in counts
         elif txn.kind == "PAYMENT" and txn.captured_at.date() < horizon:
@@ -273,14 +273,35 @@ def test_hero_carries_its_documented_fault_profile(runs, leaky):
     assert any(s.pricing_mcc == "5999" and s.effective_from == RUPAY_CC_START for s in snaps)
 
 
-def test_every_plant_points_at_an_observed_settled_transaction(runs, leaky):
-    lines_by_txn = {line.txn_id: line for line in leaky.settlement_lines if line.txn_id}
+def test_every_plant_points_at_observed_evidence(runs, leaky):
+    lines_by_txn: dict[str, list] = defaultdict(list)
+    for line in leaky.settlement_lines:
+        if line.txn_id:
+            lines_by_txn[line.txn_id].append(line)
+    plants = truth(runs["leaky"])["plants"]
+    components_by_txn: dict[str, set] = defaultdict(set)
+    for plant in plants:
+        components_by_txn[plant["txn_id"]].add(plant["component"])
     txns = leaky.transactions_by_id
-    for plant in truth(runs["leaky"])["plants"]:
+    for plant in plants:
         assert plant["txn_id"] in txns
-        line = lines_by_txn.get(plant["txn_id"])
-        if line is not None:  # a plant captured near as_of may not have settled yet
-            assert plant["charged_paise"] == line.mdr_paise + line.gst_paise + line.tcs_paise + line.tds_paise
+        lines = lines_by_txn.get(plant["txn_id"], [])
+        component = plant["component"]
+        if component == "SETTLEMENT":
+            assert lines == [], "a dropped payment must be absent from every batch"
+            continue
+        if component == "REFUND_DEBIT":
+            assert len(lines) == 2 and lines[0].batch_id != lines[1].batch_id
+            continue
+        if not lines:
+            continue  # captured near as_of; not settled yet
+        (line,) = lines
+        if component == "TAX":
+            assert plant["charged_paise"] == line.tcs_paise + line.tds_paise
+        elif component == "GST":
+            assert plant["charged_paise"] == line.gst_paise
+        elif component == "MDR" and components_by_txn[plant["txn_id"]] == {"MDR"}:
+            assert plant["charged_paise"] == line.mdr_paise + line.gst_paise
 
 
 def test_early_upi_mdr_plants_are_fully_recoverable_and_correctly_dated(runs, leaky):
@@ -307,5 +328,25 @@ def test_ppi_plants_escalate_and_never_claim_a_known_amount(runs):
 def test_claim_plants_are_positive_and_consistent(runs):
     for plant in truth(runs["leaky"])["plants"]:
         assert plant["amount_paise"] > 0
-        if plant["expected_action"] == "CLAIM":
+        if plant["component"] == "SETTLEMENT":
+            assert plant["amount_paise"] == plant["correct_paise"] - plant["charged_paise"]
+        elif plant["expected_action"] == "CLAIM":
             assert plant["amount_paise"] == plant["charged_paise"] - plant["correct_paise"]
+
+
+def test_all_six_discrepancy_classes_are_planted_at_scale():
+    """Uses the committed seed-42 dataset when present; skipped otherwise."""
+    path = Path(__file__).resolve().parents[1] / "data" / "generated" / "seed-42" / HIDDEN_DIR / TRUTH_FILE
+    if not path.exists():
+        pytest.skip("seed-42 dataset not generated")
+    kinds = {p["discrepancy_type"] for p in json.loads(path.read_text(encoding="utf-8"))["plants"]}
+    assert kinds == {"L1_WRONG_MDR_BAND", "L2_NIL_MDR_VIOLATION", "L3_GST_BASE_ERROR",
+                     "L4_TAX_MISAPPLICATION", "L5_ORPHAN_REFUND", "L6_UNSETTLED_TRANSACTION"}
+
+
+def test_network_signatures_carry_no_merchant_identity(leaky):
+    ids = {m.merchant_id for m in leaky.merchants}
+    raw = (Path(leaky.root) / "network_signatures.jsonl").read_text(encoding="utf-8")
+    assert raw, "background merchants should have published signatures"
+    assert not any(mid in raw for mid in ids)
+    assert "TXN-" not in raw

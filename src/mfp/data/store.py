@@ -13,6 +13,7 @@ from collections import defaultdict
 from functools import cached_property
 from pathlib import Path
 
+from mfp.schemas.network import NetworkSignature
 from mfp.schemas.ledger import (
     BankCredit,
     Merchant,
@@ -31,6 +32,7 @@ OBSERVED = {
     "settlement_batches": ("settlement_batches.jsonl", SettlementBatch),
     "settlement_lines": ("settlement_lines.jsonl", SettlementLine),
     "bank_credits": ("bank_credits.jsonl", BankCredit),
+    "network_signatures": ("network_signatures.jsonl", NetworkSignature),
 }
 
 
@@ -92,6 +94,10 @@ class ObservedDataset:
     @cached_property
     def bank_credits(self) -> tuple[BankCredit, ...]:
         return self._load("bank_credits")
+
+    @cached_property
+    def network_signatures(self) -> tuple[NetworkSignature, ...]:
+        return self._load("network_signatures")
 
     # -- convenience indexes ---------------------------------------------
 

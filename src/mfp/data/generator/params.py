@@ -67,10 +67,15 @@ class FaultProbabilities:
     contract_rate_drift: float = 0.15        # L1b
     upi_small_mdr: float = 0.2               # L2a
     ppi_passthrough: float = 0.25            # L2e, escalate-only
+    gst_on_exempt_card: float = 0.15         # L3a
+    gst_tax_on_tax: float = 0.1              # L3b
+    tax_on_non_eco: float = 0.05             # L4
+    duplicate_refund_debit: float = 0.15     # L5
+    dropped_from_batch: float = 0.15         # L6
 
     @classmethod
     def none(cls) -> FaultProbabilities:
-        return cls(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        return cls(*([0.0] * 11))
 
 
 # Acquirer-wide fault start dates. Single dates, so they surface as systemic.
@@ -91,6 +96,9 @@ class HeroScenario:
     contract_drift_from: date = date(2026, 2, 10)
     contract_drift_bps: int = 25
     ppi_passthrough_from: date = date(2026, 5, 1)
+    duplicate_refund_from: date = date(2026, 3, 1)
+    dropped_from_batch_from: date = date(2025, 12, 1)
+    dropped_payment_probability: float = 0.0002
 
 
 @dataclass(frozen=True)
@@ -109,6 +117,8 @@ class GenerationParams:
     refund_probability: float = 0.015
     chargeback_probability: float = 0.0005
     noise_credit_probability: float = 0.05
+    dropped_payment_probability: float = 0.002
+    duplicate_refund_probability: float = 0.02
     out_dir: Path = Path("data/generated")
     hero: HeroScenario = field(default_factory=HeroScenario)
 

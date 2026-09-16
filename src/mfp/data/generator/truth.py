@@ -29,6 +29,11 @@ class Fault(StrEnum):
     UPI_MDR_EARLY = "UPI_MDR_EARLY"                  # L2b, behavioural, acquirer-wide
     PPI_PASSTHROUGH = "PPI_PASSTHROUGH"              # L2e, behavioural, ambiguous
     RUPAY_DEBIT_AS_DEBIT = "RUPAY_DEBIT_AS_DEBIT"    # L2f, behavioural, acquirer-wide
+    GST_ON_EXEMPT_CARD = "GST_ON_EXEMPT_CARD"        # L3a, behavioural
+    GST_TAX_ON_TAX = "GST_TAX_ON_TAX"                # L3b, behavioural
+    TAX_ON_NON_ECO = "TAX_ON_NON_ECO"                # L4, behavioural
+    DUPLICATE_REFUND_DEBIT = "DUPLICATE_REFUND_DEBIT"  # L5, settlement
+    DROPPED_FROM_BATCH = "DROPPED_FROM_BATCH"        # L6, settlement
 
 
 FAULT_SUBTYPE = {
@@ -38,6 +43,11 @@ FAULT_SUBTYPE = {
     Fault.UPI_MDR_EARLY: ("L2_NIL_MDR_VIOLATION", "L2b"),
     Fault.PPI_PASSTHROUGH: ("L2_NIL_MDR_VIOLATION", "L2e"),
     Fault.RUPAY_DEBIT_AS_DEBIT: ("L2_NIL_MDR_VIOLATION", "L2f"),
+    Fault.GST_ON_EXEMPT_CARD: ("L3_GST_BASE_ERROR", "L3a"),
+    Fault.GST_TAX_ON_TAX: ("L3_GST_BASE_ERROR", "L3b"),
+    Fault.TAX_ON_NON_ECO: ("L4_TAX_MISAPPLICATION", "L4a"),
+    Fault.DUPLICATE_REFUND_DEBIT: ("L5_ORPHAN_REFUND", "L5a"),
+    Fault.DROPPED_FROM_BATCH: ("L6_UNSETTLED_TRANSACTION", "L6a"),
 }
 
 
@@ -61,6 +71,7 @@ class PlantedDiscrepancy:
     expected_action: ExpectedAction
     txn_id: str
     captured_on: date
+    component: str              # MDR | GST | TAX | REFUND_DEBIT | SETTLEMENT
     amount_paise: int           # overcharge (CLAIM) or disputed amount (ESCALATE)
     charged_paise: int
     correct_paise: int | None   # None where the correct charge is genuinely unknown
