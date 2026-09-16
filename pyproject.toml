@@ -1,0 +1,21 @@
+[project]
+name = "mfp"
+version = "0.1.0"
+description = "Merchant Financial Protection Agent - an autonomous settlement protection teammate"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.9"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tools"]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,473 @@
+{
+  "schema_version": "1.0.0",
+  "rule_set_id": "fee_rules",
+  "description": "MDR, GST and tax rules for the Indian merchant settlement model. Every rule declares its source, confidence and verification status. Rules marked ASSUMED may inform an investigation but may never support an auto-filed claim. See docs/FEE_RULES.md.",
+
+  "rounding_rules": [
+    {
+      "rule_id": "ROUND.MDR.PER_TXN",
+      "policy": "HALF_UP",
+      "applies_at": "per_transaction",
+      "confidence": "LOW",
+      "verification_status": "ASSUMED",
+      "assumptions": [
+        "No public source specifies the rounding convention acquirers apply when converting an MDR percentage to paise.",
+        "HALF_UP per transaction is the most common commercial convention and is used as the baseline.",
+        "A discrepancy that exists ONLY under this assumption must be escalated, not claimed."
+      ],
+      "source": {
+        "authority": "internal",
+        "document": "Baseline assumption pending acquirer confirmation",
+        "retrieved_on": "2026-09-16"
+      }
+    }
+  ],
+
+  "materiality_rules": [
+    {
+      "rule_id": "MAT.DEFAULT",
+      "per_case_floor_paise": 100,
+      "aggregate_floor_paise": 50000,
+      "notes": "Single cases below Rs 1.00 are held as BATCHED rather than discarded, so systematic sub-threshold drift still surfaces once a signature crosses Rs 500 in aggregate."
+    }
+  ],
+
+  "rules": [
+    {
+      "rule_id": "MDR.UPI_P2M.NIL.LEGACY",
+      "name": "UPI P2M nil MDR (legacy blanket regime)",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": { "instruments": ["UPI_P2M_BANK", "UPI_LITE"] },
+      "effective_from": "2020-01-01",
+      "effective_to": "2026-10-14",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "Ministry of Finance / Parliament",
+        "document": "Section 10A, Payment and Settlement Systems Act 2007 (inserted by Finance Act 2019) read with Section 269SU, Income-tax Act 1961; blanket zero-MDR in force from 01 Jan 2020",
+        "published_on": "2020-01-01",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Superseded on 15 Oct 2026 by the NPCI framework. Any MDR charged on bank-account UPI P2M before that date is a violation at ANY transaction value."
+    },
+    {
+      "rule_id": "MDR.UPI_P2M.NIL.UPTO_2000",
+      "name": "Statutory nil-charge protection, UPI P2M up to Rs 2,000",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": {
+        "instruments": ["UPI_P2M_BANK", "UPI_LITE"],
+        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+      },
+      "effective_from": "2026-09-14",
+      "precedence": 300,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "Ministry of Finance, Department of Financial Services",
+        "document": "Notification under Section 10A, Payment and Settlement Systems Act 2007 specifying RuPay debit cards and UPI transactions up to Rs 2,000 as protected electronic modes; no bank or system provider may impose any direct or indirect charge on payer or payee",
+        "published_on": "2026-09-14",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Highest precedence: this is a statutory prohibition and overrides any commercial MDR rule."
+    },
+    {
+      "rule_id": "MDR.UPI_P2M.STANDARD.ABOVE_2000",
+      "name": "NPCI UPI P2M MDR, 0.4 percent above Rs 2,000, capped Rs 300",
+      "rule_type": "MDR",
+      "calculation": "PERCENT_WITH_CAP",
+      "value_percent": "0.4",
+      "cap_paise": 30000,
+      "scope": {
+        "instruments": ["UPI_P2M_BANK"],
+        "merchant_classes": ["P2M"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-10-15",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "NPCI",
+        "document": "UPI MDR framework effective 15 Oct 2026; 0.4 percent on P2M above Rs 2,000, capped at Rs 300 (cap binds at Rs 75,000)",
+        "url": "https://www.business-standard.com/finance/news/npci-sets-0-4-fee-on-upi-merchant-payments-above-2-000-effective-oct-15-126091501061_1.html",
+        "published_on": "2026-09-15",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "NOT yet in force as at 2026-09-16. Application of this rule before 15 Oct 2026 is discrepancy class L2b."
+    },
+    {
+      "rule_id": "MDR.UPI_P2M.P2PM.NIL",
+      "name": "Small merchant (P2PM) exemption, UPI P2M, all amounts",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": {
+        "instruments": ["UPI_P2M_BANK", "UPI_LITE"],
+        "merchant_classes": ["P2PM"]
+      },
+      "effective_from": "2026-10-15",
+      "precedence": 200,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "NPCI",
+        "document": "P2PM small-merchant exemption: merchants receiving up to Rs 1 lakh per month via UPI QR remain at zero MDR irrespective of individual transaction value",
+        "url": "https://www.businesstoday.in/personal-finance/news/story/small-merchants-will-not-come-under-upi-mdr-even-above-rs2000-if-they-meet-this-condition-check-details-555727-2026-09-15",
+        "published_on": "2026-09-15",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Depends on the derived merchant classification; see regulatory_rules.json CLASS.P2PM.THRESHOLD."
+    },
+    {
+      "rule_id": "MDR.UPI_P2M.ESSENTIAL.FLAT",
+      "name": "Essential-sector flat MDR, UPI P2M above Rs 2,000",
+      "rule_type": "MDR",
+      "calculation": "FLAT_FEE",
+      "value_paise": 500,
+      "scope": {
+        "instruments": ["UPI_P2M_BANK"],
+        "merchant_classes": ["P2M"],
+        "mccs": ["4011", "4812", "4814", "5541", "5542", "6300", "0763"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-10-15",
+      "precedence": 150,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "NPCI",
+        "document": "Flat Rs 5 MDR above Rs 2,000 for railways, telecom, insurance, fuel and agriculture merchant categories",
+        "url": "https://www.businesstoday.in/personal-finance/story/upi-mdr-rules-rs12-on-rs3000-rs200-on-rs50000-and-rs300-cap-on-rs75000-payments-check-faqs-555724-2026-09-15",
+        "published_on": "2026-09-15",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "MDR.UPI_P2M.CAPITAL_MARKETS",
+      "name": "Capital markets MDR, UPI P2M above Rs 2,000",
+      "rule_type": "MDR",
+      "calculation": "PERCENT_WITH_CAP",
+      "value_percent": "0.02",
+      "cap_paise": 30000,
+      "scope": {
+        "instruments": ["UPI_P2M_BANK"],
+        "merchant_classes": ["P2M"],
+        "mccs": ["6211"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-10-15",
+      "precedence": 150,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "NPCI",
+        "document": "0.02 percent capped at Rs 300 for mutual funds, securities and broker categories",
+        "url": "https://www.businesstoday.in/personal-finance/story/upi-mdr-rules-rs12-on-rs3000-rs200-on-rs50000-and-rs300-cap-on-rs75000-payments-check-faqs-555724-2026-09-15",
+        "published_on": "2026-09-15",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+
+    {
+      "rule_id": "MDR.RUPAY_DEBIT.NIL.ALL_AMOUNTS",
+      "name": "RuPay debit card nil MDR, all amounts",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": { "instruments": ["RUPAY_DEBIT"] },
+      "effective_from": "2020-01-01",
+      "precedence": 300,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "Ministry of Finance, Department of Financial Services",
+        "document": "Section 10A notification of 14 Sep 2026 protects RuPay debit card payments regardless of amount, alongside UPI up to Rs 2,000",
+        "published_on": "2026-09-14",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "ASYMMETRY THAT MATTERS: RuPay debit is protected at every value, whereas UPI protection stops at Rs 2,000. Discrepancy class L2f."
+    },
+
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.NIL.UPTO_2000",
+      "name": "RuPay credit card on UPI, no MDR up to Rs 2,000",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 200,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Important Update for UPI Merchants: MDR for acceptance of RuPay Credit Card on UPI Payments. MDR applicable only above Rs 2,000, w.e.f. 01 June 2026",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.PSU_INSURANCE",
+      "name": "RuPay CC on UPI, public sector insurance",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "0.50",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "mccs": ["6301"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 150,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Annexure: MDR structure by business category, RuPay Credit Card on UPI",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      },
+      "assumptions": [],
+      "notes": "Acquirer-published and described as indicative; final MDR is MCC-driven and the bank retains discretion."
+    },
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.CONCESSIONAL_070",
+      "name": "RuPay CC on UPI, concessional 0.70 percent categories",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "0.70",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "mccs": ["0763", "4011", "4111", "4131", "4812", "4814", "6300", "7349", "8220", "9399", "9402"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 150,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Annexure: Agriculture and Allied Inputs, Railways, Transit, Transportation, Telecom, Insurance, Property Management, Education, Government, Post Office all at 0.70 percent",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.FUEL",
+      "name": "RuPay CC on UPI, fuel",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "0.75",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "mccs": ["5541", "5542"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 150,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Annexure: Fuel 0.75 percent",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.RETAIL_110",
+      "name": "RuPay CC on UPI, supermarkets, convenience stores, contractor services",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "1.10",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "mccs": ["1520", "5411", "5499"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 150,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Annexure: Contractor Services, Supermarkets, Convenience Store all at 1.10 percent",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "MDR.RUPAY_CC_UPI.DEFAULT",
+      "name": "RuPay CC on UPI, all other categories",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "1.75",
+      "scope": {
+        "instruments": ["RUPAY_CC_ON_UPI"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2026-06-01",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "Canara Bank",
+        "document": "Annexure: All Other Categories not Specified above, 1.75 percent",
+        "url": "https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1",
+        "published_on": "2026-06-01",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Lowest precedence so any specific MCC rule wins. An MCC misconfigured into this default is discrepancy class L1."
+    },
+
+    {
+      "rule_id": "MDR.PPI_ON_UPI.INTERCHANGE",
+      "name": "PPI (wallet) on UPI interchange above Rs 2,000",
+      "rule_type": "MDR",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "1.10",
+      "scope": {
+        "instruments": ["PPI_ON_UPI"],
+        "amount_range": { "min_paise": 200001 }
+      },
+      "effective_from": "2023-04-01",
+      "precedence": 100,
+      "confidence": "LOW",
+      "verification_status": "ASSUMED",
+      "assumptions": [
+        "NPCI interchange of up to 1.1 percent on PPI-on-UPI merchant transactions above Rs 2,000 is well sourced, but it is payable to the wallet issuer within the acquiring chain.",
+        "Whether a merchant sees this as an MDR line item at all is a matter of the acquirer contract, not regulation, and no public source settles it.",
+        "Therefore no PPI-on-UPI discrepancy may be auto-claimed. Every such case must route to ESCALATE (class L2e)."
+      ],
+      "source": {
+        "authority": "NPCI",
+        "document": "Interchange on PPI-based UPI merchant transactions, effective 01 Apr 2023; up to 1.1 percent, 0.5 percent for fuel, education, agriculture and utilities",
+        "published_on": "2023-03-24",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+
+    {
+      "rule_id": "GST.MDR.STANDARD",
+      "name": "GST on merchant discount rate and payment fees",
+      "rule_type": "GST",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "18",
+      "scope": {},
+      "effective_from": "2017-07-01",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBIC",
+        "document": "Standard 18 percent GST applies to the MDR or gateway fee amount, not to the transaction value",
+        "published_on": "2017-07-01",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Taxable base is the MDR amount. Applying GST to any other base is discrepancy class L3. The Canara Bank RuPay CC on UPI circular independently confirms MDR is exclusive of 18 percent GST."
+    },
+    {
+      "rule_id": "GST.EXEMPT.PA_SETTLEMENT_UPTO_2000",
+      "name": "GST exemption, RBI-regulated payment aggregator settlement up to Rs 2,000 per card transaction",
+      "rule_type": "GST_EXEMPTION",
+      "calculation": "NIL",
+      "scope": {
+        "instruments": ["CARD_DEBIT", "CARD_CREDIT", "RUPAY_DEBIT"],
+        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+      },
+      "effective_from": "2025-01-28",
+      "precedence": 200,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBIC / GST Council",
+        "document": "Circular 245/02/2025-GST following the 55th GST Council meeting: exemption under Sl. No. 34 of Notification 12/2017-CTR is available to RBI-regulated Payment Aggregators for settlement of amounts up to Rs 2,000 in a single transaction via credit, debit, charge or other payment card services, as PAs fall within the definition of acquiring bank. Payment gateways that do not settle funds are not covered.",
+        "published_on": "2025-01-28",
+        "retrieved_on": "2026-09-16"
+      },
+      "assumptions": [],
+      "notes": "UNRESOLVED: whether 'other payment card services' extends this exemption to UPI is not settled by any source we found. No rule is defined for that case, so the Rule Engine raises NoApplicableRuleError and the case escalates rather than being claimed."
+    },
+
+    {
+      "rule_id": "TCS.ECO.CGST_52",
+      "name": "TCS under CGST Section 52, e-commerce operator flows",
+      "rule_type": "TCS",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "0.5",
+      "scope": { "is_ecommerce_participant": true },
+      "effective_from": "2024-07-10",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBIC",
+        "document": "TCS under Section 52 CGST Act reduced from 1 percent to 0.5 percent (0.25 CGST + 0.25 SGST intra-state, 0.5 IGST inter-state) w.e.f. 10 July 2024. Circular 194/06/2023-GST: where multiple ECOs are involved, the supplier-side ECO that finally releases payment collects TCS.",
+        "published_on": "2024-07-10",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "TCS.PA_FLOW.NOT_APPLICABLE",
+      "name": "No TCS on a plain payment-aggregator merchant flow",
+      "rule_type": "TCS",
+      "calculation": "NIL",
+      "scope": { "is_ecommerce_participant": false },
+      "effective_from": "2017-07-01",
+      "precedence": 150,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBIC",
+        "document": "Section 52 CGST obligations attach to e-commerce operators. A payment aggregator settling funds for its own merchant is not thereby an ECO for the merchant's own supplies.",
+        "published_on": "2023-07-17",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Basis for discrepancy class L4: TCS deducted from a merchant whose flow is not an ECO flow is not a rate error, it is a deduction that should not exist at all."
+    },
+    {
+      "rule_id": "TDS.ECO.194O",
+      "name": "TDS under Section 194-O, e-commerce participant payouts",
+      "rule_type": "TDS",
+      "calculation": "FLAT_PERCENT",
+      "value_percent": "0.1",
+      "scope": { "is_ecommerce_participant": true },
+      "effective_from": "2024-10-01",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBDT",
+        "document": "Section 194-O rate reduced from 1 percent to 0.1 percent w.e.f. 01 Oct 2024 (Finance Act 2024); recodified as Section 393(1) Table Sl. No. 8(v) of the Income-tax Act 2025 in force from 01 Apr 2026. Rs 5 lakh annual floor for resident individuals and HUFs; 5 percent under Section 206AA where PAN is not furnished.",
+        "published_on": "2024-10-01",
+        "retrieved_on": "2026-09-16"
+      }
+    },
+    {
+      "rule_id": "TDS.PA_FLOW.NOT_APPLICABLE",
+      "name": "No Section 194-O TDS on a plain payment-aggregator merchant flow",
+      "rule_type": "TDS",
+      "calculation": "NIL",
+      "scope": { "is_ecommerce_participant": false },
+      "effective_from": "2020-10-01",
+      "precedence": 150,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "CBDT",
+        "document": "Circular 20/2023: a payment gateway is not required to deduct under Section 194-O where the e-commerce operator has already deducted on the same transaction; the obligation rests with the entity making final payment to the e-commerce participant.",
+        "published_on": "2023-12-28",
+        "retrieved_on": "2026-09-16"
+      },
+      "notes": "Second basis for discrepancy class L4."
+    }
+  ]
+}

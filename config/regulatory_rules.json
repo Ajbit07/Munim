@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0.0",
+  "rule_set_id": "regulatory_rules",
+  "description": "Non-fee regulatory inputs: merchant classification and the derived-state rules that gate nil-MDR eligibility. Classification is DERIVED from transaction history, not read from merchant configuration, because the P2PM to P2M transition depends on a rolling three-month test.",
+
+  "merchant_classification": {
+    "rule_id": "CLASS.P2PM.THRESHOLD",
+    "name": "NPCI P2PM small-merchant classification",
+    "monthly_inward_limit_paise": 10000000,
+    "transition_months": 3,
+    "transition_direction": "P2PM_to_P2M",
+    "evaluation": "A merchant is P2PM while monthly inward UPI credits stay at or below Rs 1,00,000. Exceeding that limit in three CONSECUTIVE months transitions the merchant to P2M. A single large payment does not by itself change classification.",
+    "effective_from": "2026-10-15",
+    "confidence": "MEDIUM",
+    "verification_status": "SECONDARY",
+    "assumptions": [
+      "The three-consecutive-month transition rule is reported by BusinessToday but we have not read the NPCI circular directly.",
+      "The reverse transition (P2M back to P2PM) is not described by any source we found. We do NOT model it; a merchant that has become P2M stays P2M, and any case turning on a reverse transition escalates."
+    ],
+    "source": {
+      "authority": "NPCI",
+      "document": "P2PM classification and transition under the UPI MDR framework effective 15 Oct 2026",
+      "url": "https://www.businesstoday.in/personal-finance/news/story/small-merchants-will-not-come-under-upi-mdr-even-above-rs2000-if-they-meet-this-condition-check-details-555727-2026-09-15",
+      "published_on": "2026-09-15",
+      "retrieved_on": "2026-09-16"
+    }
+  },
+
+  "regime_boundaries": [
+    {
+      "boundary_id": "REGIME.RUPAY_CC_UPI.MDR_START",
+      "date": "2026-06-01",
+      "description": "MDR begins applying to RuPay Credit Card on UPI above Rs 2,000, MCC-driven.",
+      "confidence": "HIGH"
+    },
+    {
+      "boundary_id": "REGIME.S10A.AMENDED",
+      "date": "2026-08-06",
+      "description": "Section 10A PSS Act converted from a blanket zero-MDR prohibition into an enabling provision; Government may notify which modes stay protected.",
+      "confidence": "HIGH"
+    },
+    {
+      "boundary_id": "REGIME.S10A.NOTIFICATION",
+      "date": "2026-09-14",
+      "description": "MoF/DFS notification protects UPI up to Rs 2,000 and RuPay debit at all amounts.",
+      "confidence": "HIGH"
+    },
+    {
+      "boundary_id": "REGIME.UPI_MDR.START",
+      "date": "2026-10-15",
+      "description": "NPCI UPI P2M MDR of 0.4 percent above Rs 2,000 commences. NOT in force as at the demo date of 2026-09-16.",
+      "confidence": "HIGH"
+    }
+  ]
+}
