@@ -2,7 +2,6 @@
   "schema_version": "1.0.0",
   "rule_set_id": "fee_rules",
   "description": "MDR, GST and tax rules for the Indian merchant settlement model. Every rule declares its source, confidence and verification status. Rules marked ASSUMED may inform an investigation but may never support an auto-filed claim. See docs/FEE_RULES.md.",
-
   "rounding_rules": [
     {
       "rule_id": "ROUND.MDR.PER_TXN",
@@ -22,7 +21,6 @@
       }
     }
   ],
-
   "materiality_rules": [
     {
       "rule_id": "MAT.DEFAULT",
@@ -31,14 +29,18 @@
       "notes": "Single cases below Rs 1.00 are held as BATCHED rather than discarded, so systematic sub-threshold drift still surfaces once a signature crosses Rs 500 in aggregate."
     }
   ],
-
   "rules": [
     {
       "rule_id": "MDR.UPI_P2M.NIL.LEGACY",
       "name": "UPI P2M nil MDR (legacy blanket regime)",
       "rule_type": "NIL_PROTECTION",
       "calculation": "NIL",
-      "scope": { "instruments": ["UPI_P2M_BANK", "UPI_LITE"] },
+      "scope": {
+        "instruments": [
+          "UPI_P2M_BANK",
+          "UPI_LITE"
+        ]
+      },
       "effective_from": "2020-01-01",
       "effective_to": "2026-10-14",
       "precedence": 100,
@@ -58,8 +60,14 @@
       "rule_type": "NIL_PROTECTION",
       "calculation": "NIL",
       "scope": {
-        "instruments": ["UPI_P2M_BANK", "UPI_LITE"],
-        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+        "instruments": [
+          "UPI_P2M_BANK",
+          "UPI_LITE"
+        ],
+        "amount_range": {
+          "min_paise": 0,
+          "max_paise": 200001
+        }
       },
       "effective_from": "2026-09-14",
       "precedence": 300,
@@ -81,9 +89,15 @@
       "value_percent": "0.4",
       "cap_paise": 30000,
       "scope": {
-        "instruments": ["UPI_P2M_BANK"],
-        "merchant_classes": ["P2M"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "UPI_P2M_BANK"
+        ],
+        "merchant_classes": [
+          "P2M"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-10-15",
       "precedence": 100,
@@ -104,8 +118,13 @@
       "rule_type": "NIL_PROTECTION",
       "calculation": "NIL",
       "scope": {
-        "instruments": ["UPI_P2M_BANK", "UPI_LITE"],
-        "merchant_classes": ["P2PM"]
+        "instruments": [
+          "UPI_P2M_BANK",
+          "UPI_LITE"
+        ],
+        "merchant_classes": [
+          "P2PM"
+        ]
       },
       "effective_from": "2026-10-15",
       "precedence": 200,
@@ -127,10 +146,24 @@
       "calculation": "FLAT_FEE",
       "value_paise": 500,
       "scope": {
-        "instruments": ["UPI_P2M_BANK"],
-        "merchant_classes": ["P2M"],
-        "mccs": ["4011", "4812", "4814", "5541", "5542", "6300", "0763"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "UPI_P2M_BANK"
+        ],
+        "merchant_classes": [
+          "P2M"
+        ],
+        "mccs": [
+          "4011",
+          "4812",
+          "4814",
+          "5541",
+          "5542",
+          "6300",
+          "0763"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-10-15",
       "precedence": 150,
@@ -152,10 +185,18 @@
       "value_percent": "0.02",
       "cap_paise": 30000,
       "scope": {
-        "instruments": ["UPI_P2M_BANK"],
-        "merchant_classes": ["P2M"],
-        "mccs": ["6211"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "UPI_P2M_BANK"
+        ],
+        "merchant_classes": [
+          "P2M"
+        ],
+        "mccs": [
+          "6211"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-10-15",
       "precedence": 150,
@@ -169,13 +210,16 @@
         "retrieved_on": "2026-09-16"
       }
     },
-
     {
       "rule_id": "MDR.RUPAY_DEBIT.NIL.ALL_AMOUNTS",
       "name": "RuPay debit card nil MDR, all amounts",
       "rule_type": "NIL_PROTECTION",
       "calculation": "NIL",
-      "scope": { "instruments": ["RUPAY_DEBIT"] },
+      "scope": {
+        "instruments": [
+          "RUPAY_DEBIT"
+        ]
+      },
       "effective_from": "2020-01-01",
       "precedence": 300,
       "confidence": "HIGH",
@@ -188,15 +232,19 @@
       },
       "notes": "ASYMMETRY THAT MATTERS: RuPay debit is protected at every value, whereas UPI protection stops at Rs 2,000. Discrepancy class L2f."
     },
-
     {
       "rule_id": "MDR.RUPAY_CC_UPI.NIL.UPTO_2000",
       "name": "RuPay credit card on UPI, no MDR up to Rs 2,000",
       "rule_type": "NIL_PROTECTION",
       "calculation": "NIL",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "amount_range": {
+          "min_paise": 0,
+          "max_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 200,
@@ -217,9 +265,15 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "0.50",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "mccs": ["6301"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "mccs": [
+          "6301"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 150,
@@ -242,9 +296,25 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "0.70",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "mccs": ["0763", "4011", "4111", "4131", "4812", "4814", "6300", "7349", "8220", "9399", "9402"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "mccs": [
+          "0763",
+          "4011",
+          "4111",
+          "4131",
+          "4812",
+          "4814",
+          "6300",
+          "7349",
+          "8220",
+          "9399",
+          "9402"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 150,
@@ -265,9 +335,16 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "0.75",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "mccs": ["5541", "5542"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "mccs": [
+          "5541",
+          "5542"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 150,
@@ -288,9 +365,17 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "1.10",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "mccs": ["1520", "5411", "5499"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "mccs": [
+          "1520",
+          "5411",
+          "5499"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 150,
@@ -311,8 +396,12 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "1.75",
       "scope": {
-        "instruments": ["RUPAY_CC_ON_UPI"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "RUPAY_CC_ON_UPI"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2026-06-01",
       "precedence": 100,
@@ -327,7 +416,32 @@
       },
       "notes": "Lowest precedence so any specific MCC rule wins. An MCC misconfigured into this default is discrepancy class L1."
     },
-
+    {
+      "rule_id": "MDR.PPI_ON_UPI.NIL.UPTO_2000",
+      "name": "No interchange on PPI (wallet) on UPI up to Rs 2,000",
+      "rule_type": "NIL_PROTECTION",
+      "calculation": "NIL",
+      "scope": {
+        "instruments": [
+          "PPI_ON_UPI"
+        ],
+        "amount_range": {
+          "min_paise": 0,
+          "max_paise": 200001
+        }
+      },
+      "effective_from": "2023-04-01",
+      "precedence": 200,
+      "confidence": "MEDIUM",
+      "verification_status": "SECONDARY",
+      "source": {
+        "authority": "NPCI",
+        "document": "PPI-on-UPI interchange applies only to merchant transactions above Rs 2,000; transactions at or below Rs 2,000 attract no interchange",
+        "url": "https://www.business-standard.com/amp/finance/news/merchant-payment-via-wallets-on-upi-to-attract-1-1-interchange-from-apr-1-123032900387_1.html",
+        "published_on": "2023-03-29",
+        "retrieved_on": "2026-09-16"
+      }
+    },
     {
       "rule_id": "MDR.PPI_ON_UPI.INTERCHANGE",
       "name": "PPI (wallet) on UPI interchange above Rs 2,000",
@@ -335,8 +449,12 @@
       "calculation": "FLAT_PERCENT",
       "value_percent": "1.10",
       "scope": {
-        "instruments": ["PPI_ON_UPI"],
-        "amount_range": { "min_paise": 200001 }
+        "instruments": [
+          "PPI_ON_UPI"
+        ],
+        "amount_range": {
+          "min_paise": 200001
+        }
       },
       "effective_from": "2023-04-01",
       "precedence": 100,
@@ -354,7 +472,6 @@
         "retrieved_on": "2026-09-16"
       }
     },
-
     {
       "rule_id": "GST.MDR.STANDARD",
       "name": "GST on merchant discount rate and payment fees",
@@ -380,8 +497,15 @@
       "rule_type": "GST_EXEMPTION",
       "calculation": "NIL",
       "scope": {
-        "instruments": ["CARD_DEBIT", "CARD_CREDIT", "RUPAY_DEBIT"],
-        "amount_range": { "min_paise": 0, "max_paise": 200001 }
+        "instruments": [
+          "CARD_DEBIT",
+          "CARD_CREDIT",
+          "RUPAY_DEBIT"
+        ],
+        "amount_range": {
+          "min_paise": 0,
+          "max_paise": 200001
+        }
       },
       "effective_from": "2025-01-28",
       "precedence": 200,
@@ -396,14 +520,15 @@
       "assumptions": [],
       "notes": "UNRESOLVED: whether 'other payment card services' extends this exemption to UPI is not settled by any source we found. No rule is defined for that case, so the Rule Engine raises NoApplicableRuleError and the case escalates rather than being claimed."
     },
-
     {
       "rule_id": "TCS.ECO.CGST_52",
       "name": "TCS under CGST Section 52, e-commerce operator flows",
       "rule_type": "TCS",
       "calculation": "FLAT_PERCENT",
       "value_percent": "0.5",
-      "scope": { "is_ecommerce_participant": true },
+      "scope": {
+        "is_ecommerce_participant": true
+      },
       "effective_from": "2024-07-10",
       "precedence": 100,
       "confidence": "HIGH",
@@ -420,7 +545,9 @@
       "name": "No TCS on a plain payment-aggregator merchant flow",
       "rule_type": "TCS",
       "calculation": "NIL",
-      "scope": { "is_ecommerce_participant": false },
+      "scope": {
+        "is_ecommerce_participant": false
+      },
       "effective_from": "2017-07-01",
       "precedence": 150,
       "confidence": "MEDIUM",
@@ -439,7 +566,9 @@
       "rule_type": "TDS",
       "calculation": "FLAT_PERCENT",
       "value_percent": "0.1",
-      "scope": { "is_ecommerce_participant": true },
+      "scope": {
+        "is_ecommerce_participant": true
+      },
       "effective_from": "2024-10-01",
       "precedence": 100,
       "confidence": "HIGH",
@@ -456,7 +585,9 @@
       "name": "No Section 194-O TDS on a plain payment-aggregator merchant flow",
       "rule_type": "TDS",
       "calculation": "NIL",
-      "scope": { "is_ecommerce_participant": false },
+      "scope": {
+        "is_ecommerce_participant": false
+      },
       "effective_from": "2020-10-01",
       "precedence": 150,
       "confidence": "MEDIUM",

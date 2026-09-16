@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mfp.core.enums import DiscrepancyType, Verdict
+from mfp.core.enums import DiscrepancyType, Instrument, Verdict
 
 
 class ComputationStep(BaseModel):
@@ -55,6 +55,11 @@ class Candidate(BaseModel):
     rationale: str  # may be LLM-authored; explanatory only
     evidence: tuple[EvidenceRef, ...] = ()
     suggested_rule_ids: tuple[str, ...] = ()
+    # What the detection claims to have found, so the Proof Engine can re-derive
+    # exactly that component. None of these carry an amount.
+    component: str | None = None        # MDR | GST | TAX | REFUND_DEBIT | SETTLEMENT | UNRESOLVED
+    pattern: str | None = None
+    instrument: Instrument | None = None
 
     @model_validator(mode="after")
     def _has_subject(self) -> Candidate:
@@ -69,6 +74,8 @@ class Candidate(BaseModel):
             "transaction_ids": sorted(self.transaction_ids),
             "settlement_batch_id": self.settlement_batch_id,
             "as_of": self.as_of.isoformat(),
+            "component": self.component,
+            "pattern": self.pattern,
         }
         encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

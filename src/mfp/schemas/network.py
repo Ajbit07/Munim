@@ -30,6 +30,7 @@ PATTERNS = frozenset({
     "gst_above_standard_base",
     "tax_on_non_eco_flow",
     "refund_debited_twice",
+    "refund_without_refund_event",
     "payment_missing_from_settlement",
 })
 

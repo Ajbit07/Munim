@@ -48,6 +48,11 @@ from pathlib import Path
 PROOF_PACKAGES = ("mfp.proof",)
 PRODUCTION_PACKAGES = (
     "mfp.proof",
+    "mfp.cases",
+    "mfp.prevention",
+    "mfp.notify",
+    "mfp.llm",
+    "mfp.runtime",
     "mfp.rules",
     "mfp.fees",
     "mfp.reconciliation",
