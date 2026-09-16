@@ -84,7 +84,7 @@ class TemplatedNotifier:
         if escalated:
             hinglish += f" {escalated} case aapke verification ke liye rakhe gaye hain."
             english += f" {escalated} case(s) are held for your verification."
-        return MerchantMessage("hi-en", hinglish, english, "whatsapp", self.name, facts=facts)
+        return MerchantMessage("hi-en", hinglish, english, "Paytm Business app", self.name, facts=facts)
 
 
 class SarvamNotifier:
@@ -123,7 +123,7 @@ class SarvamNotifier:
                     path = self.audio_dir / "merchant_update.wav"
                     path.write_bytes(base64.b64decode(audios[0]))
                     audio_path = str(path)
-            return MerchantMessage("hi-IN", text, base.english, "whatsapp", "sarvam", audio_path, facts)
+            return MerchantMessage("hi-IN", text, base.english, "Paytm Business app", "sarvam", audio_path, facts)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
             base.source = f"templated (sarvam failed: {type(exc).__name__})"
             return base

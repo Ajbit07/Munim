@@ -3,87 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Settlement Teammate</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2314213D'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='%23EEF2F0' font-family='Bahnschrift,Arial'>₹</text></svg>">
+  <meta name="color-scheme" content="light">
+  <title>Settlement Teammate · Paytm Business</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23002E6E'/><path d='M16 6l8 3v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V9z' fill='%2300BAF2'/><path d='M12.5 16.2l2.4 2.4 4.8-5' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body>
-  <header class="masthead">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true">₹</span>
-      <div>
-        <div class="brand-name">Settlement Teammate</div>
-        <div class="brand-sub" id="merchant-line">Loading merchant…</div>
+  <header class="appbar">
+    <div class="appbar-inner">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="brand-text">
+          <span class="brand-name">Settlement Teammate</span>
+          <span class="brand-for">for Paytm Business</span>
+        </div>
       </div>
-    </div>
-    <div class="clock" title="Virtual time. The demo advances it; nothing here reads the wall clock.">
-      <span class="clock-label">Virtual date</span>
-      <span class="clock-value" id="today">—</span>
-    </div>
-    <div class="controls">
-      <button class="btn primary" id="btn-next">Run next step</button>
-      <button class="btn" id="btn-auto" aria-pressed="false">Play the story</button>
-      <button class="btn" id="btn-advance">Advance 1 day</button>
-      <button class="btn quiet" id="btn-reset">Start over</button>
+      <div class="appbar-right">
+        <div class="clock" title="Virtual time. The demo advances it; nothing reads the wall clock.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span id="today">—</span>
+        </div>
+        <div class="controls">
+          <button class="btn btn-primary" id="btn-next">Run next step</button>
+          <button class="btn btn-ghost" id="btn-auto" aria-pressed="false">Play the story</button>
+          <button class="btn btn-ghost" id="btn-advance">Advance 1 day</button>
+          <button class="btn btn-link" id="btn-reset">Start over</button>
+        </div>
+      </div>
     </div>
   </header>
 
-  <section class="thesis" aria-live="polite">
-    <div class="thesis-left">
-      <div class="big-zero" id="complaints">0</div>
-      <div class="thesis-caption">complaints raised by the merchant</div>
-    </div>
-    <div class="thesis-right">
-      <div class="thesis-line" id="thesis-line">The agent has not started yet.</div>
-      <div class="step-card" id="step-card">
+  <section class="hero" aria-live="polite">
+    <div class="hero-inner">
+      <div class="merchant-card">
+        <div class="merchant-avatar" id="merchant-avatar">—</div>
+        <div class="merchant-info">
+          <div class="merchant-name" id="merchant-name">Loading merchant…</div>
+          <div class="merchant-meta" id="merchant-line">&nbsp;</div>
+          <span class="status-pill" id="agent-status"><span class="dot"></span>Teammate not started</span>
+        </div>
+        <div class="complaints">
+          <span class="complaints-value" id="complaints">0</span>
+          <span class="complaints-label">complaints raised<br>by the merchant</span>
+        </div>
+      </div>
+
+      <div class="hero-money">
+        <div class="hero-eyebrow">Found for you, without being asked</div>
+        <div class="hero-found" id="hero-found">₹0</div>
+        <div class="hero-back"><span id="hero-back">₹0</span> back in your account</div>
+        <div class="hero-bar" role="progressbar" aria-label="Share of found money recovered" aria-valuemin="0" aria-valuemax="100" id="hero-bar-wrap"><span id="hero-bar"></span></div>
+        <div class="hero-line" id="thesis-line">The teammate has not started yet.</div>
+      </div>
+
+      <div class="step-card">
         <div class="step-eyebrow" id="step-eyebrow">Ready</div>
         <div class="step-title" id="step-title">Run the first step to begin the story</div>
-        <div class="step-narrative" id="step-narrative">Each step runs the real system. Every number on this page is computed, not typed in.</div>
+        <div class="step-narrative" id="step-narrative">Each step runs the real system. Every number here is computed, not typed in.</div>
+        <ol class="stepper" id="rail" aria-label="Demo steps"></ol>
       </div>
-      <ol class="rail" id="rail" aria-label="Demo steps"></ol>
     </div>
   </section>
 
-  <section class="passbook" aria-label="What the agent has done">
-    <div class="pb-group">
-      <div class="pb-head">Money</div>
-      <div class="pb-row">
-        <div class="pb-cell"><span class="pb-label">Identified</span><span class="pb-value" id="m-identified">₹0</span></div>
-        <div class="pb-cell cr"><span class="pb-label">Recovered</span><span class="pb-value" id="m-recovered">₹0</span></div>
-        <div class="pb-cell"><span class="pb-label">Future leakage prevented</span><span class="pb-value" id="m-prevented">₹0</span></div>
-        <div class="pb-cell"><span class="pb-label">In progress</span><span class="pb-value" id="m-progress">₹0</span></div>
-      </div>
+  <section class="tiles" aria-label="What the teammate has done">
+    <div class="tile">
+      <span class="tile-icon blue"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="tile-label">Discrepancy found</span><span class="tile-value" id="m-identified">₹0</span>
     </div>
-    <div class="pb-group">
-      <div class="pb-head">Work</div>
-      <div class="pb-row">
-        <div class="pb-cell"><span class="pb-label">Proven cases</span><span class="pb-value" id="m-proven">0</span></div>
-        <div class="pb-cell"><span class="pb-label">Active claims</span><span class="pb-value" id="m-active">0</span></div>
-        <div class="pb-cell"><span class="pb-label">Escalated to a human</span><span class="pb-value" id="m-escalated">0</span></div>
-        <div class="pb-cell stamp-cell"><span class="pb-label">False claims</span><span class="pb-value" id="m-false">—</span><span class="pb-note" id="m-false-note">not tested yet</span></div>
-      </div>
+    <div class="tile">
+      <span class="tile-icon green"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="tile-label">Recovered</span><span class="tile-value green" id="m-recovered">₹0</span>
+    </div>
+    <div class="tile">
+      <span class="tile-icon navy"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.6-3 8.3-7 9.5-4-1.2-7-4.9-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
+      <span class="tile-label">Leakage stopped</span><span class="tile-value" id="m-prevented">₹0</span>
+    </div>
+    <div class="tile">
+      <span class="tile-icon amber"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="tile-label">Recovery in progress</span><span class="tile-value" id="m-progress">₹0</span>
+    </div>
+    <div class="tile">
+      <span class="tile-icon blue"><svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 9h6M9 13h6M9 17h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="tile-label">Cases proven</span><span class="tile-value" id="m-proven">0</span>
+    </div>
+    <div class="tile">
+      <span class="tile-icon amber"><svg viewBox="0 0 24 24"><path d="M4 12h12M12 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="tile-label">Claims in progress</span><span class="tile-value" id="m-active">0</span>
+    </div>
+    <div class="tile">
+      <span class="tile-icon violet"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 20c.8-3.6 3.5-5.5 7-5.5s6.2 1.9 7 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
+      <span class="tile-label">Needs your review</span><span class="tile-value" id="m-escalated">0</span>
+    </div>
+    <div class="tile tile-shield">
+      <span class="tile-icon green"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.6-3 8.3-7 9.5-4-1.2-7-4.9-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2.2 2.2L15.5 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="tile-label">False claims</span><span class="tile-value" id="m-false">—</span>
+      <span class="tile-note" id="m-false-note">Not tested yet</span>
     </div>
   </section>
 
   <main class="workspace">
-    <section class="feed-panel" aria-label="Autonomous activity">
+    <section class="panel feed-panel" aria-label="Autonomous activity">
       <div class="panel-head">
-        <h2>What the agents are doing</h2>
-        <span class="busy" id="busy" hidden>Working…</span>
+        <h2>Live activity</h2>
+        <span class="live" id="busy" hidden><span class="dot"></span>Working</span>
       </div>
       <ol class="feed" id="feed"></ol>
-      <p class="empty" id="feed-empty">Nothing yet. The agents act on their own once the story starts.</p>
+      <p class="empty" id="feed-empty">Nothing yet. The agents start on their own once the story begins.</p>
     </section>
 
-    <section class="bench" aria-label="Details">
-      <nav class="tabs" role="tablist">
+    <section class="panel bench" aria-label="Details">
+      <nav class="segmented" role="tablist">
         <button role="tab" aria-selected="true" data-tab="cases">Cases</button>
-        <button role="tab" aria-selected="false" data-tab="queue">Human queue</button>
+        <button role="tab" aria-selected="false" data-tab="queue">Needs review</button>
         <button role="tab" aria-selected="false" data-tab="causes">Root causes</button>
         <button role="tab" aria-selected="false" data-tab="network">Network</button>
         <button role="tab" aria-selected="false" data-tab="redteam">Red team</button>
         <button role="tab" aria-selected="false" data-tab="baseline">Baseline</button>
-        <button role="tab" aria-selected="false" data-tab="message">Merchant message</button>
+        <button role="tab" aria-selected="false" data-tab="message">Merchant update</button>
       </nav>
       <div class="tab-body" id="tab-cases"></div>
       <div class="tab-body" id="tab-queue" hidden></div>
@@ -95,11 +131,15 @@
     </section>
   </main>
 
+  <div class="scrim" id="scrim" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Case detail">
-    <div class="drawer-inner">
-      <button class="btn quiet drawer-close" id="drawer-close">Close</button>
-      <div id="drawer-body"></div>
+    <div class="drawer-head">
+      <span class="drawer-title">Case detail</span>
+      <button class="icon-btn" id="drawer-close" aria-label="Close case detail">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
     </div>
+    <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
   <script src="/ui/app.js"></script>

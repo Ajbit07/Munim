@@ -95,7 +95,7 @@ class RootCauseCalculator:
                     return (f"Processor pricing MCC {snap.pricing_mcc} differs from registered MCC {m.registered_mcc} "
                             f"since {snap.effective_from}",
                             [f"config snapshot {snap.snapshot_id}", f"merchant KYC MCC {m.registered_mcc}"],
-                            f"Correct pricing MCC {snap.pricing_mcc} -> {m.registered_mcc}")
+                            f"Correct pricing MCC {snap.pricing_mcc} → {m.registered_mcc}")
         if pattern == "mdr_above_agreement":
             agreement = max(view.agreements, key=lambda a: a.signed_on)
             for snap in view.processor_config:
@@ -103,7 +103,7 @@ class RootCauseCalculator:
                     return (f"Rate card credit-card MDR {snap.card_credit_rate_percent}% exceeds agreement "
                             f"{agreement.card_credit_rate_percent}% since {snap.effective_from}, with no amendment",
                             [f"config snapshot {snap.snapshot_id}", f"agreement {agreement.agreement_id}"],
-                            f"Restore credit-card MDR {snap.card_credit_rate_percent}% -> {agreement.card_credit_rate_percent}%")
+                            f"Restore credit-card MDR {snap.card_credit_rate_percent}% → {agreement.card_credit_rate_percent}%")
         if pattern == "mdr_on_protected_instrument":
             if instrument == str(Instrument.RUPAY_DEBIT):
                 return (f"RuPay debit charged MDR since {first}; protected at every amount",
