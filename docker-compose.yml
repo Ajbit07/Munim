@@ -1,0 +1,19 @@
+# n8n executes the claim lifecycle steps. The MFP API (python serve.py) runs on the host.
+#   docker compose up -d
+#   open http://localhost:5678, import workflow/n8n/claim_lifecycle.json, activate it
+#   MFP_WORKFLOW=n8n python serve.py
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - MFP_API_URL=http://host.docker.internal:8000
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - GENERIC_TIMEZONE=Asia/Kolkata
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+volumes:
+  n8n_data:

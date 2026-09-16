@@ -5,3 +5,4 @@ __pycache__/
 data/generated/
 fixtures/llm_cache/
 .env
+reports/*.json

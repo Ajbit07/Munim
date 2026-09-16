@@ -60,7 +60,6 @@ PRODUCTION_PACKAGES = (
     "mfp.workflow",
     "mfp.memory",
     "mfp.network",
-    "mfp.api",
     "mfp.data.store",
 )
 GENERATOR_PACKAGES = ("mfp.data.generator",)

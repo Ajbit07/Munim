@@ -1,4 +1,73 @@
-## Leaky dataset, seed 42
+# Misses and Limitations
+
+Generated from `python evaluate.py --seed 42` and edited only to add the
+analysis below. Nothing is omitted.
+
+## Headline
+
+| | |
+|---|---|
+| Merchants evaluated (full fidelity) | 25 |
+| Proven | ₹226,055.91 across 365 cases |
+| Recovered | ₹185,875.89 |
+| Closed unrecovered (dispute window) | ₹40,037.87 |
+| Escalated to a human | 14 cases, ₹5,557.37 in question |
+| Future leakage prevented | ₹31,847.89 |
+| **False claims** | **0** |
+| Detection misses on observable discrepancies | **0** |
+
+## Reading the misses
+
+**Unobservable (139 components).** Planted on transactions that had not settled
+by the data horizon (15 Sep 2026), mostly captured on 14–15 Sep. There is no
+settlement line to inspect yet. They are excluded from detection scoring and
+listed so the exclusion is visible.
+
+**DETECTION (0).** Every observable planted discrepancy was owned by a case.
+
+**PROOF (4 components, ₹7,023.00).** Payments dropped from settlement whose
+instrument was RuPay credit on UPI before 1 Jun 2026. Their non-settlement is
+certain, but the owed net depends on an MDR for which no sourced rule exists, so
+the Proof Engine refuses to compute it and the cases go to a human. This is the
+gate working as designed. A future rule for that period, once sourced, would
+convert them.
+
+**ACTION (12 components, ₹2.73).** Proven cases below the ₹1 per-case
+materiality floor, held BATCHED because their pattern never reached the ₹500
+aggregate floor. Intended behaviour; the floors are configurable.
+
+**RECOVERY (2,467 components, ₹40,037.87).** Claims the simulated desk refused
+as outside its 180-day dispute window. The agent recognised the rejection as
+unanswerable and closed the cases as unrecovered instead of re-presenting. This
+is the largest gap between identified and recovered, and it is a property of
+the counterparty, not of detection or proof. In a real deployment the
+12-month backfill would be most valuable in the first 180 days of history.
+
+**Amount agreement.** 356 of 357 filed cases equal the planted amount to the
+paise. The exception (₹87.57) is a dropped wallet-on-UPI payment claimed
+conservatively, net of the ASSUMED interchange; see [PROOF.md](PROOF.md).
+
+## Known limitations
+
+| Limitation | Effect | Where |
+|---|---|---|
+| Several 2026 rules are sourced from reputable press, not the circular itself (PIB and NPCI returned HTTP 403) | Marked SECONDARY; would be upgraded to PRIMARY on reading the circulars | FEE_RULES.md §8 |
+| PPI-on-UPI merchant pass-through unresolved | Every such charge escalates | FEE_RULES.md §7 |
+| GST on the new 0.4% UPI MDR assumed | Only matters from 15 Oct 2026 | FEE_RULES.md §2.2 |
+| Rounding convention assumed | Handled by requiring positivity under all policies | PROOF.md |
+| Weekends only, no holiday calendar | A holiday-dependent L6 could be early; grace of 2 banking days mitigates | settlement_rules.json |
+| P2PM class estimated at onboarding, not rolling | No effect before 15 Oct 2026 | DATA.md |
+| TCS/TDS base is gross; 194-O ₹5 lakh floor not modelled | Affects e-commerce participants only | DATA.md |
+| Claims desk is simulated (deterministic policy) | Recovery rates reflect that policy | workflow/claims.py |
+| Claude, Cognee, Sarvam adapters not exercised against live services | Deterministic fallbacks are what ran | README.md |
+| n8n workflow JSON hand-written, not imported into a running n8n | Unreachable-n8n fallback is tested | workflow/n8n |
+| Signature-only merchants' signatures are simulated from fault profiles | Network patterns combine simulated and real agent emissions | DATA.md |
+
+---
+
+## Full evaluation output
+
+### Leaky dataset, seed 42
 
 Dataset `seed-42`, 25 merchant(s), observed through 2026-09-15.
 

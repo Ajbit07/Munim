@@ -1,0 +1,86 @@
+{
+  "name": "MFP claim lifecycle",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "mfp-claim-lifecycle", "responseMode": "responseNode", "options": {} },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Claim step received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "mfp-claim-lifecycle"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": { "rules": [
+          { "value2": "submit", "output": 0 },
+          { "value2": "check", "output": 1 },
+          { "value2": "follow_up", "output": 2 },
+          { "value2": "represent", "output": 3 }
+        ] }
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Route by lifecycle step",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.MFP_API_URL }}/api/workflow/step", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {} },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Create, attach evidence, submit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 120]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.MFP_API_URL }}/api/workflow/step", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {} },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Check claim status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 260]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.MFP_API_URL }}/api/workflow/step", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {} },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Send follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.MFP_API_URL }}/api/workflow/step", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {} },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Re-present with evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 540]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ { \"ok\": true, \"executed_by\": \"n8n\", \"action\": $('Claim step received').item.json.body.action } }}", "options": {} },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Acknowledge to agent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "Claim step received": { "main": [[{ "node": "Route by lifecycle step", "type": "main", "index": 0 }]] },
+    "Route by lifecycle step": { "main": [
+      [{ "node": "Create, attach evidence, submit", "type": "main", "index": 0 }],
+      [{ "node": "Check claim status", "type": "main", "index": 0 }],
+      [{ "node": "Send follow-up", "type": "main", "index": 0 }],
+      [{ "node": "Re-present with evidence", "type": "main", "index": 0 }]
+    ] },
+    "Create, attach evidence, submit": { "main": [[{ "node": "Acknowledge to agent", "type": "main", "index": 0 }]] },
+    "Check claim status": { "main": [[{ "node": "Acknowledge to agent", "type": "main", "index": 0 }]] },
+    "Send follow-up": { "main": [[{ "node": "Acknowledge to agent", "type": "main", "index": 0 }]] },
+    "Re-present with evidence": { "main": [[{ "node": "Acknowledge to agent", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

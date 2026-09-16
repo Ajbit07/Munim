@@ -53,8 +53,10 @@ class MonitorAgent:
             self.watermarks[merchant_id] = today
             return ReconciliationReport(merchant_id, today)
         first, last = batches[0].settlement_date, batches[-1].settlement_date
-        months = (last.year - first.year) * 12 + last.month - first.month + 1
+        calendar_months = (last.year - first.year) * 12 + last.month - first.month + 1
+        months = max(1, round((last - first).days / 30.44))
         rt.events.append(ACTOR, "backfill.started", merchant_id=merchant_id, months=months,
+                         calendar_months=calendar_months,
                          first_settlement=first.isoformat(), last_settlement=last.isoformat(),
                          reason=f"New merchant: auditing {months} months of settlement history before waiting for new activity",
                          tool="reconciliation_engine.reconcile")
@@ -65,6 +67,7 @@ class MonitorAgent:
                              findings=stats.get("findings", 0))
         cases = self.open_cases(merchant_id, report, source="backfill")
         rt.events.append(ACTOR, "backfill.completed", merchant_id=merchant_id, months=months,
+                         calendar_months=calendar_months,
                          transactions=report.transactions_scanned, lines=report.lines_scanned,
                          batches=report.batches_scanned, credits_matched=report.credits_matched,
                          unrelated_credits_ignored=report.unrelated_credits, awaiting_cycle=report.awaiting_cycle,

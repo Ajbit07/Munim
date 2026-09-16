@@ -112,8 +112,10 @@ merchant to P2M. A single large payment does not by itself change classification
   transition **escalates**.
 - Config: `regulatory_rules.json → merchant_classification`.
 
-This is why classification is computed from transaction history inside the Rule
-Engine rather than read from a merchant record. It is **not** a fourth agent.
+The rule scope carries `merchant_classes`, so classification decides eligibility
+at resolution time. In this build the class is estimated once at onboarding
+(a declared simplification in `docs/DATA.md`); it does not affect any outcome in
+the modelling window, because the P2PM exemption commences 15 Oct 2026.
 
 ### 2.2 Unresolved: GST on the new 0.4% MDR
 
@@ -156,8 +158,9 @@ circular, an issuer document read directly (status `PRIMARY`).
 
 **Scope caveat, recorded honestly:** the circular describes these rates as
 "indicative" and states the bank "retains the final authority in determining the
-applicable MDR." They are therefore modelled as **acquirer-scoped**, not
-national. Confidence HIGH on the table, MEDIUM on universality.
+applicable MDR." Confidence is HIGH on the table and MEDIUM on universality. The
+rule scope supports an `acquirers` list for exactly this reason; this build
+applies the table to every acquirer, pending a second issuer's circular.
 
 The gap between the 1.75% default and a correct 1.10% supermarket MCC is
 **0.65% of every qualifying transaction** — discrepancy class **L1**, and the
@@ -193,11 +196,12 @@ Payment *gateways* that do not settle funds are **not** covered.
 - Rule `GST.EXEMPT.PA_SETTLEMENT_UPTO_2000`, precedence 200.
 
 **Unresolved and deliberately not resolved:** whether "other payment card
-services" extends the exemption to **UPI**. We found no source that settles it.
-We therefore define **no rule** for that case, so the Rule Engine raises
-`NoApplicableRuleError` and the case **escalates**. The test suite asserts that
-UPI is absent from this rule's scope, so a future contributor cannot quietly
-widen it.
+services" extends the exemption to **UPI**. We found no source that settles it,
+so UPI is absent from this rule's scope and a test asserts it stays absent.
+Inside the modelling window this cannot change an outcome: protected UPI carries
+no MDR, so there is no GST base to argue about. It becomes live only for UPI MDR
+charged legitimately from 15 Oct 2026, where the standard 18% is applied by
+analogy with card MDR (§2.2) and flagged as an assumption.
 
 ---
 

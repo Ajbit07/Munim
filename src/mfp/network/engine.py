@@ -23,6 +23,12 @@ EMITTABLE = frozenset({CaseState.PROVEN, CaseState.ACTION_PENDING, CaseState.BAT
                        CaseState.ESCALATED})
 
 
+# The instrument carries no meaning for these patterns, so every emitter omits it
+# and signatures from different merchants aggregate into one pattern.
+INSTRUMENTLESS = frozenset({"refund_debited_twice", "refund_without_refund_event",
+                            "payment_missing_from_settlement", "tax_on_non_eco_flow"})
+
+
 class SignatureEmitter:
     """Runs inside a merchant's context. Turns a case into its shareable shape."""
 
@@ -38,7 +44,8 @@ class SignatureEmitter:
         return NetworkSignature(
             signature_id=f"SIG-{emitter}-{case.pattern}-{case.instrument or 'ANY'}-{case.month.replace('-', '')}",
             emitter=emitter, discrepancy_type=case.discrepancy_type, pattern=case.pattern,
-            instrument=case.instrument, rule_id=rule_id, processor_route=route,
+            instrument=None if case.pattern in INSTRUMENTLESS else case.instrument,
+            rule_id=rule_id, processor_route=route,
             merchant_segment=merchant_segment(mcc), month=case.month,
             occurrences_bucket=occurrences_bucket(len(case.txn_ids)), impact_floor_paise=impact_floor(amount),
         )

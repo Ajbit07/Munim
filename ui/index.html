@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settlement Teammate</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2314213D'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='%23EEF2F0' font-family='Bahnschrift,Arial'>₹</text></svg>">
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">₹</span>
+      <div>
+        <div class="brand-name">Settlement Teammate</div>
+        <div class="brand-sub" id="merchant-line">Loading merchant…</div>
+      </div>
+    </div>
+    <div class="clock" title="Virtual time. The demo advances it; nothing here reads the wall clock.">
+      <span class="clock-label">Virtual date</span>
+      <span class="clock-value" id="today">—</span>
+    </div>
+    <div class="controls">
+      <button class="btn primary" id="btn-next">Run next step</button>
+      <button class="btn" id="btn-auto" aria-pressed="false">Play the story</button>
+      <button class="btn" id="btn-advance">Advance 1 day</button>
+      <button class="btn quiet" id="btn-reset">Start over</button>
+    </div>
+  </header>
+
+  <section class="thesis" aria-live="polite">
+    <div class="thesis-left">
+      <div class="big-zero" id="complaints">0</div>
+      <div class="thesis-caption">complaints raised by the merchant</div>
+    </div>
+    <div class="thesis-right">
+      <div class="thesis-line" id="thesis-line">The agent has not started yet.</div>
+      <div class="step-card" id="step-card">
+        <div class="step-eyebrow" id="step-eyebrow">Ready</div>
+        <div class="step-title" id="step-title">Run the first step to begin the story</div>
+        <div class="step-narrative" id="step-narrative">Each step runs the real system. Every number on this page is computed, not typed in.</div>
+      </div>
+      <ol class="rail" id="rail" aria-label="Demo steps"></ol>
+    </div>
+  </section>
+
+  <section class="passbook" aria-label="What the agent has done">
+    <div class="pb-group">
+      <div class="pb-head">Money</div>
+      <div class="pb-row">
+        <div class="pb-cell"><span class="pb-label">Identified</span><span class="pb-value" id="m-identified">₹0</span></div>
+        <div class="pb-cell cr"><span class="pb-label">Recovered</span><span class="pb-value" id="m-recovered">₹0</span></div>
+        <div class="pb-cell"><span class="pb-label">Future leakage prevented</span><span class="pb-value" id="m-prevented">₹0</span></div>
+        <div class="pb-cell"><span class="pb-label">In progress</span><span class="pb-value" id="m-progress">₹0</span></div>
+      </div>
+    </div>
+    <div class="pb-group">
+      <div class="pb-head">Work</div>
+      <div class="pb-row">
+        <div class="pb-cell"><span class="pb-label">Proven cases</span><span class="pb-value" id="m-proven">0</span></div>
+        <div class="pb-cell"><span class="pb-label">Active claims</span><span class="pb-value" id="m-active">0</span></div>
+        <div class="pb-cell"><span class="pb-label">Escalated to a human</span><span class="pb-value" id="m-escalated">0</span></div>
+        <div class="pb-cell stamp-cell"><span class="pb-label">False claims</span><span class="pb-value" id="m-false">—</span><span class="pb-note" id="m-false-note">not tested yet</span></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="workspace">
+    <section class="feed-panel" aria-label="Autonomous activity">
+      <div class="panel-head">
+        <h2>What the agents are doing</h2>
+        <span class="busy" id="busy" hidden>Working…</span>
+      </div>
+      <ol class="feed" id="feed"></ol>
+      <p class="empty" id="feed-empty">Nothing yet. The agents act on their own once the story starts.</p>
+    </section>
+
+    <section class="bench" aria-label="Details">
+      <nav class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="cases">Cases</button>
+        <button role="tab" aria-selected="false" data-tab="queue">Human queue</button>
+        <button role="tab" aria-selected="false" data-tab="causes">Root causes</button>
+        <button role="tab" aria-selected="false" data-tab="network">Network</button>
+        <button role="tab" aria-selected="false" data-tab="redteam">Red team</button>
+        <button role="tab" aria-selected="false" data-tab="baseline">Baseline</button>
+        <button role="tab" aria-selected="false" data-tab="message">Merchant message</button>
+      </nav>
+      <div class="tab-body" id="tab-cases"></div>
+      <div class="tab-body" id="tab-queue" hidden></div>
+      <div class="tab-body" id="tab-causes" hidden></div>
+      <div class="tab-body" id="tab-network" hidden></div>
+      <div class="tab-body" id="tab-redteam" hidden></div>
+      <div class="tab-body" id="tab-baseline" hidden></div>
+      <div class="tab-body" id="tab-message" hidden></div>
+    </section>
+  </main>
+
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Case detail">
+    <div class="drawer-inner">
+      <button class="btn quiet drawer-close" id="drawer-close">Close</button>
+      <div id="drawer-body"></div>
+    </div>
+  </aside>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
