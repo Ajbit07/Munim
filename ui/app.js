@@ -273,7 +273,7 @@ async function renderActiveTab() {
   });
   el.querySelectorAll("[data-review]").forEach((btn) => btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    review(btn.dataset.rcase, btn.dataset.review);
+    askReview(btn);
   }));
 }
 
@@ -451,19 +451,65 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") openDrawer
 let busy = false;
 let autoplay = false;
 
-async function review(caseId, action) {
-  const verb = action === "file" ? "File this correction on your authority" : "Dismiss this case";
-  const note = window.prompt(`${verb}. Add a note for the record (optional):`, "");
-  if (note === null) return;
-  const res = await fetch(`/api/cases/${caseId}/review`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, note, reviewer: "Merchant success desk" }),
+// Inline confirmation: the browser pane does not support window.prompt/alert.
+function askReview(btn) {
+  const caseId = btn.dataset.rcase;
+  const action = btn.dataset.review;
+  const box = btn.closest(".actions");
+  const original = box.innerHTML;
+  const question = action === "file"
+    ? "File this correction on your authority? It goes to Paytm settlement ops with your name as the approver."
+    : "Dismiss this case? Nothing will be filed.";
+  box.innerHTML = `<div class="review-confirm">
+      <p>${question}</p>
+      <input type="text" maxlength="300" placeholder="Note for the record (optional)" aria-label="Note for the record">
+      <div class="review-buttons">
+        <button type="button" class="btn ${action === "file" ? "btn-solid" : "btn-danger"}" data-confirm>${action === "file" ? "Confirm and file" : "Confirm dismiss"}</button>
+        <button type="button" class="btn btn-outline" data-cancel>Cancel</button>
+      </div>
+      <p class="review-error" hidden></p>
+    </div>`;
+  box.addEventListener("click", (ev) => ev.stopPropagation());
+  box.addEventListener("keydown", (ev) => ev.stopPropagation());
+  const input = box.querySelector("input");
+  input.focus();
+  box.querySelector("[data-cancel]").addEventListener("click", () => {
+    box.innerHTML = original;
+    box.querySelectorAll("[data-review]").forEach((b) => b.addEventListener("click", (ev) => { ev.stopPropagation(); askReview(b); }));
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    alert(body.detail || "The review could not be recorded.");
-  }
-  await refreshAll();
+  const confirm = box.querySelector("[data-confirm]");
+  const submit = async () => {
+    confirm.disabled = true;
+    confirm.textContent = "Recording…";
+    const error = box.querySelector(".review-error");
+    try {
+      const res = await fetch(`/api/cases/${caseId}/review`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, note: input.value.trim(), reviewer: "Merchant success desk" }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `The review could not be recorded (${res.status}).`);
+      }
+      await refreshAll();
+      if (action === "file") openCase(caseId);
+    } catch (err) {
+      error.textContent = err instanceof TypeError ? "Can't reach the server. Try again." : err.message;
+      error.hidden = false;
+      confirm.disabled = false;
+      confirm.textContent = "Try again";
+    }
+  };
+  confirm.addEventListener("click", submit);
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
+}
+
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
 async function act(url) {
@@ -479,7 +525,7 @@ async function act(url) {
     return body;
   } catch (err) {
     if (err instanceof TypeError) setOffline(true);  // network failure: the banner explains and retries
-    else alert(err.message);
+    else toast(err.message);
     return null;
   } finally {
     clearInterval(poll);
