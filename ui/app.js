@@ -33,6 +33,9 @@ const PATTERNS = {
   refund_debited_twice: "Refund debited twice",
   refund_without_refund_event: "Refund debit with no refund",
   payment_missing_from_settlement: "Payment missing from settlement",
+  mdr_above_turnover_cap: "Debit MDR above the RBI ceiling",
+  rental_after_return: "Device rental after return",
+  rental_during_waiver: "Device rental in the free period",
 };
 const INSTRUMENTS = {
   UPI_P2M_BANK: "UPI", UPI_LITE: "UPI Lite", RUPAY_CC_ON_UPI: "RuPay credit on UPI", PPI_ON_UPI: "Wallet on UPI",
@@ -45,9 +48,10 @@ const AGENTS = {
 const INITIALS = { MONITOR_AGENT: "MO", INVESTIGATION_AGENT: "IN", PROOF_ENGINE: "PR", FOLLOWUP_AGENT: "FU", WORKFLOW_ENGINE: "WF", SYSTEM: "SY", HUMAN: "YOU" };
 const STATE_LABELS = {
   RECOVERED: "Recovered", PARTIALLY_RECOVERED: "Partly recovered", ESCALATED: "Needs review", CLOSED_UNRECOVERED: "Not recovered",
-  WAITING: "Awaiting desk", FILED: "Claim filed", FOLLOW_UP: "Following up", REPRESENT: "Re-presenting", REJECTED: "Rejected",
+  WAITING: "Awaiting ops", FILED: "Correction filed", FOLLOW_UP: "Following up", REPRESENT: "Re-presenting", REJECTED: "Rejected",
   ACTION_PENDING: "Ready to claim", BATCHED: "Held (under ₹1)", CLOSED: "Closed", APPLIED: "Fix applied", REQUESTED: "Fix requested",
-  RECOMMENDED: "Fix recommended", NEEDS_HUMAN: "Needs review",
+  RECOMMENDED: "Fix recommended", NEEDS_HUMAN: "Needs review", WITHDRAWN: "Withdrawn (paid late)",
+  RECURRED: "Fix did not hold",
 };
 
 const pattern = (p) => PATTERNS[p] || (p || "").replaceAll("_", " ");
@@ -59,7 +63,7 @@ const stat = (label, value, cls = "") => `<div class="chip-stat ${cls}"><b>${val
 
 // -- activity feed ---------------------------------------------------------------
 
-const SHOW_STATES = new Set(["FILED", "PARTIALLY_RECOVERED", "ESCALATED", "REJECTED", "REPRESENT", "CLOSED_UNRECOVERED", "FOLLOW_UP"]);
+const SHOW_STATES = new Set(["FILED", "PARTIALLY_RECOVERED", "ESCALATED", "REJECTED", "REPRESENT", "CLOSED_UNRECOVERED", "FOLLOW_UP", "WITHDRAWN", "CLOSED"]);
 
 function describe(e) {
   const p = e.payload || {};
@@ -80,9 +84,13 @@ function describe(e) {
       if (!SHOW_STATES.has(p.to_state)) return null;
       return [`${c}${(STATE_LABELS[p.to_state] || p.to_state).toLowerCase()}: ${p.reason}`, p.to_state === "CLOSED_UNRECOVERED" ? "alert" : ""];
     case "claim.held": return [`${c}held: ${p.reason}.`];
-    case "workflow.submit": return [`Claim ${p.claim_id} submitted via ${p.engine} workflow. Reference ${p.reference}.`];
-    case "workflow.follow_up": return [`Follow-up sent on ${p.claim_id}.`];
-    case "workflow.response": return [`Claims desk replied on ${p.claim_id}: ${p.status.replaceAll("_", " ").toLowerCase()}${p.reason_code ? " (" + p.reason_code + ")" : ""}.`];
+    case "workflow.submit": return [`Correction ${p.claim_id} sent to Paytm settlement ops via the ${p.engine} workflow. Reference ${p.reference}.`];
+    case "workflow.follow_up": return [`Follow-up sent to settlement ops on ${p.claim_id}.`];
+    case "workflow.response": return [`Settlement ops replied on ${p.claim_id}: ${p.status.replaceAll("_", " ").toLowerCase()}${p.reason_code ? " (" + p.reason_code + ")" : ""}.`];
+    case "workflow.withdraw": return [`Correction ${p.claim_id} withdrawn: ${p.reason}.`];
+    case "settlement.delay.detected": return [`${p.payments} payments settled late (worst ${p.worst_days_late} banking days past the agreed date). Reported to settlement ops; no money is owed for a delay.`, "alert"];
+    case "workflow.n8n.step": return [`n8n executed the ${p.action.replaceAll("_", "-")} step for ${p.claim_id}.`];
+    case "pattern.recurred": return [`${c}the fix confirmed earlier did not hold: ${pattern(p.pattern).toLowerCase()} is back. Correction re-requested.`, "alert"];
     case "workflow.fallback": return [`n8n unreachable; the claim continues on the local workflow.`, "alert"];
     case "recovery.confirmed": return [`${rupees(p.recovered_paise, true)} back in the merchant's account (${p.claim_id}).`, "money"];
     case "prevention.requested": return [`${c}fix requested so this stops recurring.`];
@@ -177,6 +185,9 @@ function renderState(s) {
   $("m-proven").textContent = m.proven_cases;
   $("m-active").textContent = m.active_claims;
   $("m-escalated").textContent = m.escalated;
+  $("m-escalated-note").textContent = m.human_filed_claims ? `${m.human_filed_claims} filed on your authority` : "";
+  $("m-active-note").textContent = m.withdrawn ? `${m.withdrawn} withdrawn: paid late, not lost` : "";
+  $("m-progress-note").textContent = m.late_settlements ? `${m.late_settlements} late settlements reported` : "";
   if (s.redteam) {
     $("m-false").textContent = s.redteam.false_claims;
     $("m-false").classList.toggle("zero", s.redteam.false_claims === 0);
@@ -208,11 +219,28 @@ function renderState(s) {
   $("btn-advance").disabled = !merchant.connected;
 }
 
+let offlineTimer = null;
+
+function setOffline(offline) {
+  $("offline").hidden = !offline;
+  if (offline && !offlineTimer) {
+    offlineTimer = setInterval(() => refreshAll(), 3000);
+  } else if (!offline && offlineTimer) {
+    clearInterval(offlineTimer);
+    offlineTimer = null;
+  }
+}
+
 async function refreshAll() {
-  const s = await (await fetch("/api/state")).json();
-  renderState(s);
-  await pullEvents();
-  await renderActiveTab();
+  try {
+    const s = await (await fetch("/api/state")).json();
+    renderState(s);
+    await pullEvents();
+    await renderActiveTab();
+    setOffline(false);
+  } catch (err) {
+    setOffline(true);
+  }
 }
 
 // -- tabs ---------------------------------------------------------------------------------
@@ -241,8 +269,12 @@ async function renderActiveTab() {
   el.innerHTML = html;
   el.querySelectorAll("[data-case]").forEach((row) => {
     row.addEventListener("click", () => openCase(row.dataset.case));
-    row.addEventListener("keydown", (ev) => { if (ev.key === "Enter") openCase(row.dataset.case); });
+    row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === row) openCase(row.dataset.case); });
   });
+  el.querySelectorAll("[data-review]").forEach((btn) => btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    review(btn.dataset.rcase, btn.dataset.review);
+  }));
 }
 
 const SHIELD = `<svg viewBox="0 0 32 32" width="20" height="20"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round"/></svg>`;
@@ -262,16 +294,34 @@ const TABS = {
 
   async queue() {
     const items = await (await fetch("/api/human-queue")).json();
-    if (!items.length) return `<p class="empty">Nothing needs your review. Cases the teammate cannot prove land here instead of being claimed.</p>`;
-    return `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person.</p>` +
+    if (!items.length) return `<p class="empty">Nothing needs your review. Cases the teammate cannot prove land here instead of being filed.</p>`;
+    return `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. Filing one records your name as the authority; the teammate then follows it through.</p>` +
       items.map((c) => `<div class="card" data-case="${c.case_id}" tabindex="0" style="cursor:pointer">
-      <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">Claim not filed</span></div>
+      <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">Not filed</span></div>
       <dl class="kv">
         <dt>Why it stopped</dt><dd>${esc(c.escalation?.reason)}</dd>
         <dt>What is missing</dt><dd>${esc((c.escalation?.missing || []).join("; ") || "—")}</dd>
         <dt>Amount in question</dt><dd><b>${rupees(c.escalation?.disputed_paise || 0, true)}</b></dd>
         <dt>Case</dt><dd class="mono">${c.case_id}</dd>
-      </dl></div>`).join("");
+      </dl>
+      <div class="actions">
+        <button class="btn btn-solid" data-review="file" data-rcase="${c.case_id}">File on my authority</button>
+        <button class="btn btn-outline" data-review="dismiss" data-rcase="${c.case_id}">Dismiss</button>
+      </div></div>`).join("");
+  },
+
+  async delays() {
+    const d = await (await fetch("/api/late-settlements")).json();
+    if (!d.payments) return `<p class="empty">No late settlements. Every payment arrived within the agreed timeline.</p>`;
+    const months = Object.entries(d.by_month);
+    return `<p class="note">Late money is reported to settlement operations, not claimed: the merchant agreement sets a timeline but no penalty. Payments that never arrive are handled as missing-payment corrections instead.</p>
+      <div class="summary-strip">${stat("payments settled late", d.payments)}${stat("held up", rupees(d.held_up_paise))}${stat("banking days late on average", d.average_days_late)}</div>
+      <table class="grid"><thead><tr><th>Month settled</th><th class="num">Late payments</th><th class="num">Amount</th><th class="num">Worst delay</th></tr></thead><tbody>` +
+      months.map(([m, r]) => `<tr><td>${m}</td><td class="num">${r.payments}</td><td class="num amount">${rupees(r.held_up_paise)}</td><td class="num">${r.worst_days_late} banking days</td></tr>`).join("") +
+      `</tbody></table><h3 style="margin:18px 0 6px;color:var(--navy);font-size:15px">Most recent</h3>
+      <table class="grid"><thead><tr><th>Payment</th><th>Agreed by</th><th>Arrived</th><th class="num">Days late</th><th class="num">Net</th></tr></thead><tbody>` +
+      d.recent.map((b) => `<tr><td class="mono">${b.txn_id}</td><td>${b.deadline}</td><td>${b.settled_on}</td><td class="num">${b.banking_days_late}</td><td class="num">${rupees(b.net_paise, true)}</td></tr>`).join("") +
+      `</tbody></table>`;
   },
 
   async causes() {
@@ -354,7 +404,9 @@ async function openCase(caseId) {
   const seal = p ? `<div class="seal ${proven ? "" : "unproven"}"><span class="seal-badge">${proven ? CHECK : PERSON}</span>
       <div><strong>${verdictText}</strong><small>${p.proof_id} · ${p.computed_at.slice(0, 10)} · ${p.records} records checked</small></div></div>` : "";
 
-  const txRows = d.transactions.map((t) => `<tr><td class="mono">${t.txn_id}</td><td>${instrument(t.instrument)}</td><td class="num">${rupees(t.amount_paise, true)}</td><td>${t.captured_at.slice(0, 16).replace("T", " ")}</td></tr>`).join("");
+  const txRows = d.transactions.map((t) => t.device
+    ? `<tr><td class="mono">${t.txn_id}</td><td colspan="3">Soundbox ${t.device.device_id}: activated ${t.device.activated_on}, rental-free until ${t.device.rental_free_until}, <b>returned ${t.device.returned_on || "not returned"}</b>${t.device.return_ref ? ` (pickup ref ${t.device.return_ref})` : ""}. Monthly rental ${rupees(t.amount_paise, true)}.</td></tr>`
+    : `<tr><td class="mono">${t.txn_id}</td><td>${instrument(t.instrument)}</td><td class="num">${rupees(t.amount_paise, true)}</td><td>${t.captured_at.slice(0, 16).replace("T", " ")}</td></tr>`).join("");
   const lineRows = d.lines.map((l) => `<tr><td class="mono">${l.batch_id}</td><td class="num">${rupees(l.gross_paise, true)}</td><td class="num dr">${rupees(l.mdr_paise, true)}</td><td class="num dr">${rupees(l.gst_paise, true)}</td><td class="num dr">${rupees(l.tcs_paise + l.tds_paise, true)}</td><td class="num">${rupees(l.net_paise, true)}</td></tr>`).join("");
   const credits = d.credits.slice(0, 3).map((k) => `<div class="utr">Bank credit ${k.value_date} · UTR ${k.utr} · ${rupees(k.amount_paise, true)}</div>`).join("");
   const rules = d.rules.map((r) => `<div class="card" style="margin:6px 0"><b>${esc(r.name)}</b><div class="mono">${esc(r.rule_id)}</div><div class="note">${esc(r.source)}${r.effective_from ? ` · in force from ${r.effective_from}${r.effective_to ? " to " + r.effective_to : ""}` : ""} · ${esc(r.status).toLowerCase()} · ${esc(r.confidence).toLowerCase()} confidence</div></div>`).join("");
@@ -381,7 +433,7 @@ async function openCase(caseId) {
       ${step(5, "Calculation", `<div class="calc">${esc(calc)}</div>`)}
       ${step(6, "Proof", p ? `<div class="figures"><div class="figure"><small>Expected</small><b>${rupees(p.expected_paise, true)}</b></div><div class="figure"><small>Actual</small><b>${rupees(p.actual_paise, true)}</b></div><div class="figure hl"><small>Verified difference</small><b>${rupees(p.discrepancy_paise, true)}</b></div></div>${seal}${p.unproven_reason ? `<p class="note">${esc(p.unproven_reason)}</p>` : ""}` : "Not yet proven.")}
       ${step(7, "Decision", decisions || "—")}
-      ${step(8, "Claim", cl ? `<div><span class="mono">${cl.claim_id}</span> · ref <span class="mono">${cl.reference}</span> · <b>${rupees(cl.amount_paise, true)}</b> via ${esc(cl.workflow)} workflow</div><div class="note">Evidence attached: ${cl.attachments.join(", ")}</div>` : "No claim filed.")}
+      ${step(8, "Correction", cl ? `<div><span class="mono">${cl.claim_id}</span> · ref <span class="mono">${cl.reference}</span> · <b>${rupees(cl.amount_paise, true)}</b> sent to Paytm settlement ops via the ${esc(cl.workflow)} workflow</div><div class="note">Evidence attached: ${cl.attachments.join(", ")}${c.human_attestation ? ` · filed on the authority of ${esc(c.human_attestation.reviewer)}` : ""}</div>` : "Nothing filed.")}
       ${step(9, "Follow-up", followups || "—")}
       ${step(10, "Outcome", outcome + rootCause)}
     </ol>`;
@@ -399,6 +451,21 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") openDrawer
 let busy = false;
 let autoplay = false;
 
+async function review(caseId, action) {
+  const verb = action === "file" ? "File this correction on your authority" : "Dismiss this case";
+  const note = window.prompt(`${verb}. Add a note for the record (optional):`, "");
+  if (note === null) return;
+  const res = await fetch(`/api/cases/${caseId}/review`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, note, reviewer: "Merchant success desk" }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    alert(body.detail || "The review could not be recorded.");
+  }
+  await refreshAll();
+}
+
 async function act(url) {
   if (busy) return null;
   busy = true;
@@ -411,7 +478,8 @@ async function act(url) {
     if (!res.ok) throw new Error(body.detail || res.statusText);
     return body;
   } catch (err) {
-    alert(err.message);
+    if (err instanceof TypeError) setOffline(true);  // network failure: the banner explains and retries
+    else alert(err.message);
     return null;
   } finally {
     clearInterval(poll);

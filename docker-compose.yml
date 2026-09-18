@@ -1,7 +1,8 @@
 # n8n executes the claim lifecycle steps. The MFP API (python serve.py) runs on the host.
 #   docker compose up -d
-#   open http://localhost:5678, import workflow/n8n/claim_lifecycle.json, activate it
-#   MFP_WORKFLOW=n8n python serve.py
+#   docker compose exec n8n n8n import:workflow --input=/workflows/claim_lifecycle.json
+#   docker compose exec n8n n8n publish:workflow --id=mfpClaimLifecyc && docker compose restart n8n
+#   MFP_WORKFLOW=n8n python serve.py --host 0.0.0.0     (see README: n8n calls back into the API)
 services:
   n8n:
     image: n8nio/n8n:latest
@@ -15,5 +16,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./workflow/n8n:/workflows:ro
 volumes:
   n8n_data:

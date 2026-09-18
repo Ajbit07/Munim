@@ -46,6 +46,9 @@ _ACTIONS = {
     "refund_without_refund_event": "Reject settlement debits that carry no refund or chargeback event",
     "payment_missing_from_settlement": "Reconcile batch-close captures into the next settlement file",
     "unverified_interchange_passthrough": "Obtain the acquirer's contractual basis for wallet interchange pass-through",
+    "mdr_above_turnover_cap": "Correct the merchant's turnover band so debit cards are priced within the RBI ceiling",
+    "rental_after_return": "Stop the device rental mandate against the recorded return",
+    "rental_during_waiver": "Start rental billing only after the rental-free period",
 }
 
 
@@ -104,6 +107,19 @@ class RootCauseCalculator:
                             f"{agreement.card_credit_rate_percent}% since {snap.effective_from}, with no amendment",
                             [f"config snapshot {snap.snapshot_id}", f"agreement {agreement.agreement_id}"],
                             f"Restore credit-card MDR {snap.card_credit_rate_percent}% → {agreement.card_credit_rate_percent}%")
+        if pattern == "mdr_above_turnover_cap":
+            return (f"Debit cards priced above the RBI ceiling for a merchant with previous-year turnover of "
+                    f"Rs {m.annual_turnover_paise / 100:,.0f} (below Rs 20 lakh) since {first}",
+                    ["MDR_CAP.DEBIT_CARD.SMALL_MERCHANT"], "Record the merchant in the up-to-Rs-20-lakh band")
+        if pattern in ("rental_after_return", "rental_during_waiver"):
+            device = view.devices[0] if view.devices else None
+            if device is not None and pattern == "rental_after_return":
+                return (f"{device.device_type.title()} {device.device_id} returned on {device.returned_on} "
+                        f"(pickup ref {device.return_ref}); rental still debited since {first}",
+                        [f"device {device.device_id}"], f"Stop rental on {device.device_id}")
+            if device is not None:
+                return (f"Rental debited during the rental-free period ending {device.rental_free_until}",
+                        [f"device {device.device_id}"], "Align rental billing start with the rental-free period")
         if pattern == "mdr_on_protected_instrument":
             if instrument == str(Instrument.RUPAY_DEBIT):
                 return (f"RuPay debit charged MDR since {first}; protected at every amount",
@@ -138,6 +154,8 @@ class RootCauseCalculator:
                     txn = view.transactions_by_id.get(txn_id)
                     if txn is not None:
                         dated.append((txn.captured_at.date(), share))
+                    elif ":" in txn_id:  # a monthly charge reference, e.g. "SBX-MER-0001:2026-05"
+                        dated.append((date.fromisoformat(txn_id.rsplit(":", 1)[1] + "-01"), share))
             if not dated:
                 continue
             first = min(d for d, _ in dated)
@@ -147,7 +165,8 @@ class RootCauseCalculator:
             impact = sum(c.proof.discrepancy_paise for c in proven) if proven else sum(c.proof.discrepancy_paise for c in family)
             window_start = as_of - timedelta(weeks=TRAILING_WEEKS)
             trailing = sum(v for d, v in dated if d > window_start)
-            active = (as_of - last).days <= ACTIVE_WITHIN_DAYS
+            window = 35 if pattern.startswith("rental_") else ACTIVE_WITHIN_DAYS  # monthly charges recur monthly
+            active = (as_of - last).days <= window
             weekly = int(trailing / TRAILING_WEEKS) if active else 0
             rule_ids = {r for c in family for r in (c.proof.rule_ids if c.proof else ())}
             weeks, note = self._horizon(pattern, instrument, rule_ids, as_of, view.merchant.upi_class)

@@ -113,9 +113,11 @@ merchant to P2M. A single large payment does not by itself change classification
 - Config: `regulatory_rules.json → merchant_classification`.
 
 The rule scope carries `merchant_classes`, so classification decides eligibility
-at resolution time. In this build the class is estimated once at onboarding
-(a declared simplification in `docs/DATA.md`); it does not affect any outcome in
-the modelling window, because the P2PM exemption commences 15 Oct 2026.
+at resolution time. The runtime classifies on a rolling basis
+(`Runtime.classify`): from 15 Oct 2026 a merchant declared P2PM is treated as
+P2M once its inward UPI exceeded ₹1 lakh in each of the three preceding
+calendar months. A merchant declared P2M stays P2M. The red team includes a
+P2PM merchant that crossed the limit, so a 0.4% charge on it is not claimed.
 
 ### 2.2 Unresolved: GST on the new 0.4% MDR
 
@@ -260,6 +262,37 @@ Consequences encoded in `settlement_rules.json`:
 
 ---
 
+## 6a. Debit-card MDR ceilings by merchant turnover
+
+**RBI circular RBI/2017-18/105 (6 Dec 2017)**, read on rbi.org.in: status
+`PRIMARY`, confidence HIGH. It caps debit-card MDR by the merchant's **previous
+financial year turnover**:
+
+| Merchant turnover | MDR ceiling | Cap per transaction |
+|---|---|---|
+| Up to ₹20 lakh | 0.40% | ₹200 |
+| Above ₹20 lakh | 0.90% | ₹1,000 |
+
+Rules `MDR_CAP.DEBIT_CARD.SMALL_MERCHANT` and `MDR_CAP.DEBIT_CARD.OTHER_MERCHANT`
+(`RuleType.MDR_CAP`, scoped by `turnover_range`). The Fee Engine takes the lower
+of the agreement rate and the ceiling; an actual MDR above the ceiling is
+pattern `mdr_above_turnover_cap` (L1c). RuPay debit is nil-charge under §1 and
+never reaches this rule.
+
+**Declared assumption:** the ceiling still binds non-RuPay debit cards (no later
+RBI circular withdrawing it was found). The lower QR-based variant for small
+merchants is not modelled separately.
+
+## 6b. Device rental and settlement delay
+
+Neither is a regulatory rate. A **soundbox/EDC rental** is a contract term
+(`CONTRACT.DEVICE.RENTAL_TERMS`, an invariant, not a sourced rule): no rental is
+due for a month that starts after the device's recorded return, or within its
+rental-free period. A **settlement delay** is measured against the merchant's
+contracted SLA (§6) plus 2 banking days' grace, with weekends and the national
+holiday list excluded. It is reported to settlement operations, never claimed as
+money, because the agreement sets a timeline but no penalty.
+
 ## 7. PPI / wallet on UPI — the honest gap
 
 NPCI introduced interchange on PPI-funded UPI merchant transactions from
@@ -291,6 +324,7 @@ Ranked by how much a wrong answer would cost:
 | 2 | NPCI's own 15 Oct 2026 circular and FAQ | We relied on press reporting; PIB and NPCI both returned HTTP 403 | Fetch from npci.org.in directly |
 | 3 | GST on the new 0.4% UPI MDR | Affects every post-15-Oct GST computation | CBIC clarification or an acquirer's rate card |
 | 4 | P2PM reverse transition | Currently unmodelled by declared assumption | NPCI circular |
+| 7 | Whether the 2017 debit-card ceilings still bind every acquirer | Governs L1c | A current RBI master direction or acquirer rate card |
 | 5 | Whether the Sl. 34 GST exemption reaches UPI | Would widen L3 materially | CBIC clarification |
 | 6 | RuPay-CC-on-UPI rate universality across acquirers | Rates are modelled acquirer-scoped because of this | A second issuer's circular |
 
@@ -308,6 +342,7 @@ assumption**, which is the correct behaviour while they remain open.
 - [Business Standard — NPCI sets 0.4% fee, effective 15 Oct](https://www.business-standard.com/finance/news/npci-sets-0-4-fee-on-upi-merchant-payments-above-2-000-effective-oct-15-126091501061_1.html)
 - [Business Today — UPI MDR worked examples and FAQs](https://www.businesstoday.in/personal-finance/story/upi-mdr-rules-rs12-on-rs3000-rs200-on-rs50000-and-rs300-cap-on-rs75000-payments-check-faqs-555724-2026-09-15)
 - [Business Today — P2PM small-merchant exemption](https://www.businesstoday.in/personal-finance/news/story/small-merchants-will-not-come-under-upi-mdr-even-above-rs2000-if-they-meet-this-condition-check-details-555727-2026-09-15)
+- [RBI/2017-18/105 — Rationalisation of MDR for debit card transactions (PRIMARY)](https://www.rbi.org.in/commonman/English/scripts/Notification.aspx?Id=2620)
 - [Canara Bank — MDR on RuPay Credit Card on UPI (PRIMARY)](https://www.canarabank.bank.in/documents/d/guest/mdr-on-rupay-credit-card-on-upi-payments1)
 - [CBIC Circular 194/06/2023-GST — TCS, multiple ECOs](https://gstcouncil.gov.in/sites/default/files/2024-06/circular-cgst-194.pdf)
 - [Taxscan — CBIC Circular 245/02/2025, PA GST exemption](https://www.taxscan.in/gst-exemption-available-to-rbi-regulated-payment-aggregators-pas-which-involves-handling-money/483812)

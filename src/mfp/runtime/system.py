@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,7 @@ from mfp.agents.monitor import MonitorAgent
 from mfp.agents.reasoner import ClaudeReasoner, DeterministicReasoner, Reasoner
 from mfp.cases.state_machine import IN_FLIGHT, Case, CaseRepository, CaseStateMachine
 from mfp.core.clock import VirtualClock
-from mfp.core.enums import Actor, CaseState
+from mfp.core.enums import Actor, CaseState, Instrument, MerchantClass
 from mfp.core.events import EventLog
 from mfp.data.store import MerchantIndex, MerchantView, ObservedDataset
 from mfp.fees.engine import FeeEngine
@@ -74,6 +74,12 @@ class Runtime:
 
         self.rules = RuleEngine.from_config(config_dir)
         self.fees = FeeEngine(self.rules)
+        classification = load_raw("regulatory_rules.json", config_dir)["merchant_classification"]
+        self._class_limit = classification["monthly_inward_limit_paise"]
+        self._class_months = classification["transition_months"]
+        self._class_from = date.fromisoformat(classification["effective_from"])
+        self._inflow_cache: dict[str, dict[tuple[int, int], int]] = {}
+        self.fees.classifier = self.classify
         self.recon = ReconciliationEngine(self.fees, load_raw("settlement_rules.json", config_dir))
         self.proof = ProofEngine(self.fees, self.recon, self.clock)
         self.state_machine = CaseStateMachine(self.events, self.clock)
@@ -105,6 +111,7 @@ class Runtime:
         self.root_cause_calc = RootCauseCalculator(self.rules)
         self._root_causes: dict[str, list[RootCause]] = {}
         self._prevention_status: dict[str, str] = {}
+        self.sla_breaches: dict[str, list] = {}
 
         self.monitor = MonitorAgent(self)
         self.investigation = InvestigationAgent(self)
@@ -119,6 +126,38 @@ class Runtime:
 
     def observed_through(self) -> date:
         return min(self.clock.today(), self.data_through)
+
+    def classify(self, merchant, on: date) -> MerchantClass:
+        """Rolling NPCI classification: a P2PM merchant becomes P2M after three
+        consecutive months above the inward-UPI limit (regulatory_rules.json).
+        No reverse transition is modelled; see FEE_RULES.md section 2.1."""
+        declared = MerchantClass(merchant.upi_class)
+        if declared is MerchantClass.P2M or on < self._class_from:
+            return declared
+        inflow = self._inflow_cache.get(merchant.merchant_id)
+        if inflow is None:
+            inflow = defaultdict(int)
+            try:
+                view = self.view(merchant.merchant_id)
+            except KeyError:
+                return declared
+            for txn in view.transactions:
+                if (txn.kind == "PAYMENT" and txn.status == "SUCCESS"
+                        and txn.instrument in (Instrument.UPI_P2M_BANK, Instrument.UPI_LITE)):
+                    inflow[(txn.captured_at.year, txn.captured_at.month)] += txn.amount_paise
+            self._inflow_cache[merchant.merchant_id] = inflow
+        year, month, streak = on.year, on.month, 0
+        for _ in range(24):
+            month -= 1
+            if month == 0:
+                year, month = year - 1, 12
+            if inflow.get((year, month), 0) > self._class_limit:
+                streak += 1
+                if streak >= self._class_months:
+                    return MerchantClass.P2M
+            else:
+                streak = 0
+        return declared
 
     def view(self, merchant_id: str) -> MerchantView:
         if merchant_id not in self._views:
@@ -195,7 +234,9 @@ class Runtime:
             self.network.ingest([signature])
 
     def refresh_root_causes(self) -> None:
-        today = self.clock.today()
+        # Whether a fault is still occurring is judged against the last day we have
+        # records for; a clock run past the data must not make every fault look stopped.
+        today = self.observed_through()
         for merchant_id in self.connected:
             found = self.root_cause_calc.analyse(self.cases.all(merchant_id), self.view(merchant_id), today)
             for rc in found:
@@ -208,6 +249,34 @@ class Runtime:
     def _root_cause_id(self, case: Case) -> str:
         return f"RC-{case.merchant_id}-{case.pattern}-{case.instrument or 'ANY'}"
 
+    def prevention_status(self, rc_id: str) -> str | None:
+        return self._prevention_status.get(rc_id)
+
+    def mark_recurred(self, rc_id: str) -> None:
+        self._prevention_status[rc_id] = "RECURRED"
+
+    def review(self, case_id: str, action: str, reviewer: str, note: str = "") -> Case:
+        """A person acts on a case in the human queue."""
+        case = self.cases.get(case_id)
+        if case.state is not S.ESCALATED:
+            raise ValueError(f"{case_id} is {case.state}; only cases waiting for review can be acted on")
+        if action == "file":
+            case.human_attestation = {"reviewer": reviewer, "note": note, "at": self.clock.now().isoformat()}
+            self.state_machine.transition(
+                case, S.ACTION_PENDING, Actor.HUMAN,
+                f"{reviewer} reviewed the evidence and authorised a claim"
+                + (f": {note}" if note else ""), decision="claim on human authority",
+                action="handed to Follow-up Agent")
+            self.work()
+        elif action == "dismiss":
+            self.state_machine.transition(
+                case, S.CLOSED, Actor.HUMAN, f"{reviewer} dismissed the case" + (f": {note}" if note else ""),
+                decision="do not claim")
+            self.remember(case)
+        else:
+            raise ValueError(f"unknown review action {action!r}")
+        return case
+
     def request_prevention(self, case: Case) -> None:
         rc_id = self._root_cause_id(case)
         if rc_id not in self._prevention_status:
@@ -218,7 +287,7 @@ class Runtime:
 
     def confirm_prevention(self, case: Case) -> None:
         rc_id = self._root_cause_id(case)
-        if self._prevention_status.get(rc_id) != "APPLIED":
+        if self._prevention_status.get(rc_id) not in ("APPLIED",):
             self._prevention_status[rc_id] = "APPLIED"
             self.events.append(Actor.FOLLOWUP_AGENT, "prevention.applied", case_id=case.case_id,
                                merchant_id=case.merchant_id, root_cause_id=rc_id,
@@ -234,6 +303,8 @@ class Runtime:
     def metrics(self, merchant_id: str | None = None) -> dict[str, Any]:
         cases = self.cases.all(merchant_id)
         proven = [c for c in cases if c.proof is not None and c.proof.authorises_claim]
+        breaches = [b for mid, bs in self.sla_breaches.items() if merchant_id in (None, mid) for b in bs]
+        human_filed = [c for c in cases if c.human_attestation and c.claim_id]
         recovered = sum(c.recovered_paise for c in cases)
         closed_unrecovered = sum(c.proven_paise for c in cases if c.state is S.CLOSED_UNRECOVERED)
         in_progress = sum(c.proven_paise for c in proven if c.state not in (*RECOVERY_STATES, S.CLOSED, S.CLOSED_UNRECOVERED))
@@ -260,6 +331,13 @@ class Runtime:
             "false_claims_blocked": len(self.events.of_kind("proof_gate.blocked")),
             "states": dict(sorted(states.items())),
             "months_affected": len({c.month for c in proven}),
+            "withdrawn": states.get("WITHDRAWN", 0),
+            "human_filed_claims": len(human_filed),
+            "human_filed_paise": sum(c.claimed_paise for c in human_filed),
+            "late_settlements": len(breaches),
+            "late_settlement_paise": sum(b.net_paise for b in breaches),
+            "late_settlement_worst_days": max((b.banking_days_late for b in breaches), default=0),
+            "regressions": sum(1 for c in cases if c.regression),
             "memory_assisted_claims": sum(1 for e in self.events.of_kind("case.state.changed")
                                           if e.payload.get("memory_applied") and (merchant_id is None or e.merchant_id == merchant_id)),
             "network": {"signatures": len(self.network), "patterns": len(self.network.patterns()[0])},
@@ -281,8 +359,12 @@ class Runtime:
         out = []
         for case in self.cases.all():
             filed = any(t.to_state == "FILED" for t in case.history)
-            out.append({**case.summary(), "txn_ids": list(case.txn_ids), "filed": filed})
+            out.append({**case.summary(), "txn_ids": list(case.txn_ids), "filed": filed,
+                        "human_filed": case.human_attestation is not None})
         return out
+
+    def export_breaches(self) -> list[dict[str, Any]]:
+        return [{**b.__dict__} for bs in self.sla_breaches.values() for b in bs]
 
     def dump(self, path: Path) -> None:
         path.write_text(json.dumps(self.export_results(), indent=1, default=str), encoding="utf-8")

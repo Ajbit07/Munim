@@ -599,6 +599,63 @@
         "retrieved_on": "2026-09-16"
       },
       "notes": "Second basis for discrepancy class L4."
+    },
+    {
+      "rule_id": "MDR_CAP.DEBIT_CARD.SMALL_MERCHANT",
+      "name": "RBI debit card MDR ceiling, merchants with turnover up to Rs 20 lakh",
+      "rule_type": "MDR_CAP",
+      "calculation": "PERCENT_WITH_CAP",
+      "value_percent": "0.40",
+      "cap_paise": 20000,
+      "scope": {
+        "instruments": [
+          "CARD_DEBIT"
+        ],
+        "turnover_range": {
+          "min_paise": 0,
+          "max_paise": 200000001
+        }
+      },
+      "effective_from": "2018-01-01",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "RBI",
+        "document": "RBI/2017-18/105, DPSS.CO.PD No.1633/02.14.003/2017-18, Rationalisation of Merchant Discount Rate (MDR) for Debit Card Transactions, effective 1 Jan 2018. Small merchants (turnover up to Rs 20 lakh in the previous financial year): physical POS not exceeding 0.40%, cap Rs 200 per transaction; QR 0.30%. Other merchants: physical POS not exceeding 0.90%, cap Rs 1,000; QR 0.80%.",
+        "url": "https://www.rbi.org.in/commonman/English/scripts/Notification.aspx?Id=2620",
+        "published_on": "2017-12-06",
+        "retrieved_on": "2026-09-18"
+      },
+      "notes": "A ceiling, not a rate: the contracted debit rate applies unless it exceeds this. Modelled for physical card acceptance; the 0.30% QR ceiling is not modelled because debit-card-by-QR is not an instrument in this build."
+    },
+    {
+      "rule_id": "MDR_CAP.DEBIT_CARD.OTHER_MERCHANT",
+      "name": "RBI debit card MDR ceiling, merchants with turnover above Rs 20 lakh",
+      "rule_type": "MDR_CAP",
+      "calculation": "PERCENT_WITH_CAP",
+      "value_percent": "0.90",
+      "cap_paise": 100000,
+      "scope": {
+        "instruments": [
+          "CARD_DEBIT"
+        ],
+        "turnover_range": {
+          "min_paise": 200000001
+        }
+      },
+      "effective_from": "2018-01-01",
+      "precedence": 100,
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY",
+      "source": {
+        "authority": "RBI",
+        "document": "RBI/2017-18/105, DPSS.CO.PD No.1633/02.14.003/2017-18, Rationalisation of Merchant Discount Rate (MDR) for Debit Card Transactions, effective 1 Jan 2018. Small merchants (turnover up to Rs 20 lakh in the previous financial year): physical POS not exceeding 0.40%, cap Rs 200 per transaction; QR 0.30%. Other merchants: physical POS not exceeding 0.90%, cap Rs 1,000; QR 0.80%.",
+        "url": "https://www.rbi.org.in/commonman/English/scripts/Notification.aspx?Id=2620",
+        "published_on": "2017-12-06",
+        "retrieved_on": "2026-09-18"
+      },
+      "notes": "A ceiling, not a rate. Applying the large-merchant ceiling to a small merchant is discrepancy class L1c."
     }
   ]
 }

@@ -84,7 +84,7 @@ def main():
         show(director.next())
         if args.pause:
             input()
-    print("\nThe merchant didn't ask. The agent found it, proved it, acted on it, and followed it through.")
+    print("\nThe merchant didn't ask. Paytm found its own error, proved it, corrected it, and followed it through.")
 
 
 if __name__ == "__main__":

@@ -77,6 +77,11 @@ class LocalWorkflowEngine:
         self.desk.chase(claim.claim_id, self.clock.now())
         self._step(claim, "FOLLOW_UP", engine)
 
+    def withdraw(self, claim: Claim, reason: str, engine: str | None = None) -> None:
+        self.desk.withdraw(claim.claim_id)
+        claim.status = ClaimStatus.WITHDRAWN
+        self._step(claim, "WITHDRAW", engine, reason=reason)
+
     def represent(self, claim: Claim, added: set[str], note: str, engine: str | None = None) -> str:
         claim.attachments |= added
         self._step(claim, "REPRESENT", engine, added=sorted(added), note=note)
@@ -88,7 +93,7 @@ class N8nWorkflowEngine:
 
     name = "n8n"
 
-    def __init__(self, local: LocalWorkflowEngine, webhook_url: str | None = None, timeout: float = 3.0) -> None:
+    def __init__(self, local: LocalWorkflowEngine, webhook_url: str | None = None, timeout: float = 10.0) -> None:
         self.local = local
         self.webhook_url = webhook_url or os.environ.get("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/mfp-claim-lifecycle")
         self.timeout = timeout
@@ -103,7 +108,11 @@ class N8nWorkflowEngine:
         request = urllib.request.Request(self.webhook_url, data=body, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read() or b"{}")
+                reply = json.loads(response.read() or b"{}")
+            self.local.events.append(Actor.WORKFLOW_ENGINE, "workflow.n8n.step", case_id=claim.case_id,
+                                     merchant_id=claim.merchant_id, claim_id=claim.claim_id, action=action,
+                                     engine="n8n", executed_by=reply.get("executed_by"))
+            return reply
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             self.available = False
             self.local.events.append(Actor.WORKFLOW_ENGINE, "workflow.fallback", case_id=claim.case_id,
@@ -125,3 +134,6 @@ class N8nWorkflowEngine:
 
     def represent(self, claim: Claim, added: set[str], note: str) -> str:
         return self.local.represent(claim, added, note, self._engine(self._call("represent", claim, added=sorted(added))))
+
+    def withdraw(self, claim: Claim, reason: str) -> None:
+        self.local.withdraw(claim, reason, self._engine(self._call("withdraw", claim)))

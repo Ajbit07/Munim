@@ -32,6 +32,7 @@ class ClaimStatus(StrEnum):
     PARTIALLY_APPROVED = "PARTIALLY_APPROVED"
     REJECTED = "REJECTED"
     FINAL_REJECTED = "FINAL_REJECTED"
+    WITHDRAWN = "WITHDRAWN"
 
 
 BASE_ATTACHMENTS = frozenset({"proof", "settlement_trace", "rule_citation"})
@@ -116,6 +117,9 @@ class MockClaimsDesk:
             self._refs += 1
             claim.reference = f"DSP-{now:%Y%m%d}-{self._refs:05d}"
         return claim.reference
+
+    def withdraw(self, claim_id: str) -> None:
+        self._entries.pop(claim_id, None)
 
     def chase(self, claim_id: str, now: datetime) -> None:
         entry = self._entries[claim_id]

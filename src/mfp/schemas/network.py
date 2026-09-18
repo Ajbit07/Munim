@@ -32,6 +32,10 @@ PATTERNS = frozenset({
     "refund_debited_twice",
     "refund_without_refund_event",
     "payment_missing_from_settlement",
+    "mdr_above_turnover_cap",
+    "rental_after_return",
+    "rental_during_waiver",
+    "settlement_delayed",
 })
 
 _SEGMENTS = {

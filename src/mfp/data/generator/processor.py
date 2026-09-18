@@ -53,6 +53,7 @@ def charge_ledger(
     upi_class = MerchantClass(m["upi_class"])
     eco = m["is_ecommerce_participant"]
     registered_mcc = m["registered_mcc"]
+    turnover = m.get("annual_turnover_paise")
     agreement_rates = world.agreement_rates()
 
     result = ChargeResult({}, {}, [], [])
@@ -68,12 +69,12 @@ def charge_ledger(
 
         correct = tariff.correct_charges(
             instrument, amount, on, mcc=registered_mcc, rates=agreement_rates,
-            upi_class=upi_class, is_ecommerce_participant=eco,
+            upi_class=upi_class, is_ecommerce_participant=eco, turnover=turnover,
         )
         snap = world.snapshot_on(on)
         configured = tariff.correct_charges(
             instrument, amount, on, mcc=snap["pricing_mcc"], rates=world.snapshot_rates(snap),
-            upi_class=upi_class, is_ecommerce_participant=eco,
+            upi_class=upi_class, is_ecommerce_participant=eco, turnover=turnover,
         )
 
         # -- stage 1: MDR ------------------------------------------------
@@ -113,6 +114,8 @@ def charge_ledger(
                                   after, after, None, ("MDR.PPI_ON_UPI.INTERCHANGE",))
             else:
                 rule_ids = ("AGREEMENT",) if mdr_fault is Fault.CONTRACT_RATE_DRIFT else (correct.mdr_rule or "UNSOURCED",)
+                if mdr_fault is Fault.TURNOVER_BAND_MISAPPLIED:
+                    rule_ids = ("MDR_CAP.DEBIT_CARD.SMALL_MERCHANT",)
                 planted |= _plant(result, world, txn_id, on, mdr_fault, "MDR", ExpectedAction.CLAIM,
                                   after - before, after, before, rule_ids)
         if gst_fault is not None:
@@ -175,6 +178,14 @@ def _mdr_stage(
         mdr = tariff.pct(amount, Rate.from_percent(snap_rates.card_debit))
         gst, gst_rule = tariff.gst(Instrument.CARD_DEBIT, amount, mdr, on)
         return replace(configured, mdr=mdr, gst=gst, mdr_rule="AGREEMENT", gst_rule=gst_rule)
+
+    if instrument is Instrument.CARD_DEBIT and world.active_fault(Fault.TURNOVER_BAND_MISAPPLIED, on):
+        # The processor believes this is a large merchant and prices at the large-merchant ceiling.
+        mdr = min(tariff.pct(amount, tariff.large_debit_rate), tariff.large_debit_cap)
+        if mdr > configured.mdr:
+            gst, gst_rule = tariff.gst(Instrument.CARD_DEBIT, amount, mdr, on)
+            return replace(configured, mdr=mdr, gst=gst, mdr_rule="MDR_CAP.DEBIT_CARD.OTHER_MERCHANT",
+                           gst_rule=gst_rule), Fault.TURNOVER_BAND_MISAPPLIED
 
     if instrument is Instrument.RUPAY_DEBIT and world.active_fault(Fault.RUPAY_DEBIT_AS_DEBIT, on):
         return processed_as_debit_card(), Fault.RUPAY_DEBIT_AS_DEBIT

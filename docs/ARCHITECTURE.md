@@ -9,9 +9,9 @@ The line between them is enforced in code, not in prose.
 
 | Agent | Question it answers | Does | Never does |
 |---|---|---|---|
-| **Monitor** (`agents/monitor.py`) | What needs attention right now? | On connect, launches the historical audit unprompted. Each clock tick: observes new batches, reconciles only what changed, opens a case for every unowned group of findings. | Judge a finding |
+| **Monitor** (`agents/monitor.py`) | What needs attention right now? | On connect, launches the historical audit unprompted. Each clock tick: observes new batches, reconciles only what changed, opens a case for every unowned group of findings; reports settlements later than SLA + grace; flags a pattern that returns after its fix was confirmed. | Judge a finding |
 | **Investigation** (`agents/investigation.py`) | What happened, and is there enough evidence? | Gathers records, rules, rate-card history and precedent; asks the Reasoner for an interpretation; builds a Candidate with no amount; submits it to the Proof Engine; routes the verdict to action, human queue or closure. | Set an amount or a verdict |
-| **Follow-up** (`agents/followup.py`) | What happens next, and can I finish it alone? | Files through the proof gate; pilots one claim per pattern before batching; attaches evidence memory says wins; chases silence; represents answerable rejections; closes or escalates the rest; confirms recovery; requests the configuration fix. | File without a PROVEN proof computed from the case's own candidate |
+| **Follow-up** (`agents/followup.py`) | What happens next, and can I finish it alone? | Files through the proof gate; pilots one claim per pattern before batching; attaches evidence memory says wins; chases silence; represents answerable rejections; withdraws a correction when a missing payment arrives late; closes or escalates the rest; confirms recovery; requests the configuration fix; files an escalated case only once a person authorises it. | File without a PROVEN proof computed from the case's own candidate |
 
 There is no fourth agent. Classification, rounding, materiality, network
 aggregation and root cause are deterministic modules.
@@ -20,9 +20,9 @@ aggregation and root cause are deterministic modules.
 
 | Module | Responsibility |
 |---|---|
-| Rule Engine (`rules/engine.py`) | Exactly one rule for a (types, date, instrument, amount, MCC, class, acquirer, e-commerce) query, or `NoApplicableRuleError` / `AmbiguousRuleError`. Cached by amount band. |
-| Fee Engine (`fees/engine.py`) | Expected charges under all three rounding policies; decomposition of actual deductions into MDR, GST and tax components. |
-| Reconciliation Engine (`reconciliation/engine.py`) | transaction → line → batch → bank credit by UTR; batch integrity; L1–L6 findings; full or incremental. |
+| Rule Engine (`rules/engine.py`) | Exactly one rule for a (types, date, instrument, amount, MCC, class, acquirer, e-commerce, turnover) query, or `NoApplicableRuleError` / `AmbiguousRuleError`. Cached by amount band. |
+| Fee Engine (`fees/engine.py`) | Expected charges under all three rounding policies, including the RBI debit-card ceiling for the merchant's turnover band and the rolling P2PM class; decomposition of actual deductions into MDR, GST and tax components. |
+| Reconciliation Engine (`reconciliation/engine.py`) | transaction → line → batch → bank credit by UTR; batch integrity; L1–L7 findings (incl. device rental against device records); SLA breaches on a weekend-and-holiday calendar; full or incremental. |
 | Proof Engine (`proof/engine.py`) | Re-derives every candidate from raw records; the only producer of `ProofResult`. See [PROOF.md](PROOF.md). |
 | Case State Machine (`cases/state_machine.py`) | Legal transitions only; every transition recorded with actor, reason, tool, evidence, result. |
 | Network Pattern Engine (`network/engine.py`) | Aggregates privacy-safe signatures; surfaces patterns only at k ≥ 5 distinct merchants. |
@@ -41,8 +41,9 @@ generate.py ──▶ observed artifacts (merchants, agreements, rate-card histo
 ObservedDataset / MerchantIndex ──▶ Monitor ──▶ Reconciliation ──▶ Findings
    ──▶ Case (DISCOVERED) ──▶ Investigation ──▶ Reasoner (advisory)
    ──▶ Candidate ──▶ Proof Engine ──▶ ProofResult
-   ──▶ PROVEN: Follow-up ──▶ Workflow ──▶ Claims desk ──▶ recovery, prevention
-   ──▶ UNPROVEN: Human queue
+   ──▶ PROVEN: Follow-up ──▶ Workflow (local or n8n) ──▶ Paytm settlement ops ──▶ recovery, prevention
+   ──▶ UNPROVEN: Human queue ──▶ person files (attested) or dismisses
+   ──▶ late settlements: SLA breach report (never a money claim)
    ──▶ every step: EventLog (append-only, hash-chained) ──▶ UI feed, drill-down, audit
    ──▶ proven/escalated cases: SignatureEmitter ──▶ Network Pattern Engine
 ```
@@ -57,6 +58,10 @@ DISCOVERED → INVESTIGATING → CANDIDATE → PROVING → PROVEN → ACTION_PEN
                   └→ ESCALATED                                                       │              ├→ CLOSED_UNRECOVERED
                                                                                      │              └→ ESCALATED
 ```
+
+Also: `FILED | WAITING | FOLLOW_UP → WITHDRAWN` when a missing payment arrives
+late, and `ESCALATED → ACTION_PENDING | CLOSED`, which only `Actor.HUMAN` may
+take (`HUMAN_ONLY`; an agent attempting it raises `IllegalTransition`).
 
 `ALLOWED` in `cases/state_machine.py` is the source of truth; a test replays
 every recorded history against it.

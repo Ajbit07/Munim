@@ -57,20 +57,20 @@ MDR+GST charged minus expected. Undercharges are never claimed.
 
 ## Worked example (from the demo)
 
-Shree Ganesh Supermart, August 2026, 119 bank-account UPI payments above ₹2,000:
+Shree Ganesh Supermart, August 2026, 101 bank-account UPI payments above ₹2,000:
 
 ```
-TXN-MER-0001-0044115 MDR
-  charged 2076 − expected 0 under MDR.UPI_P2M.NIL.LEGACY
+TXN-MER-0001-0044496 MDR
+  charged 1264 − expected 0 under MDR.UPI_P2M.NIL.LEGACY
   (UPI P2M nil MDR, legacy blanket regime; in force until 14 Oct 2026)
-  range across rounding policies 2076..2076
-  = 2076 paise
-… 118 more transactions, each re-derived identically
-total  = 1,96,967 paise
+  range across rounding policies 1264..1264
+  = 1264 paise
+… 100 more transactions, each re-derived identically
+total  = 1,74,478 paise
 
-EXPECTED ₹0.00     ACTUAL −₹1,969.67     VERIFIED DIFFERENCE ₹1,969.67
-evidence: 119 ledger events, 119 settlement lines, their batches, bank credits by UTR,
-          rate-card snapshot; 255 records
+EXPECTED ₹0.00     ACTUAL −₹1,744.78     VERIFIED DIFFERENCE ₹1,744.78
+evidence: 101 ledger events, 101 settlement lines, their batches, bank credits by UTR,
+          rate-card snapshot; 221 records
 ```
 
 The acquirer began applying NPCI's 0.4% UPI MDR on 20 Aug 2026. It takes effect
@@ -85,14 +85,24 @@ on 15 Oct 2026.
 | Bank credit missing for the batch | UNPROVEN → human | The chain from charge to money is broken |
 | Payment not in any batch but not yet due | NOT_A_DISCREPANCY | Contracted SLA plus grace has not elapsed |
 | Charge half a paise off under another rounding convention | Not a finding | Positive only under a different assumption |
+| Rental billed for the month the device was returned in | Not a finding | The device was held on the first day of the month |
+| Debit MDR at exactly the RBI ceiling for a small merchant | Not a finding | The ceiling is a maximum, not a target |
+| Missing payment that arrives before the correction resolves | WITHDRAWN | Reported as a delay; nothing is owed |
 | Rate rose, but a later agreement amendment exists | Not a finding | The agreement in force on the capture date governs |
 
 ## Conservative choices
 
 - **Dropped wallet payment.** Its non-settlement is proven, but how much of the
   gross the processor may keep depends on the ASSUMED interchange rule. The claim
-  deducts that charge, so it is under-claimed rather than over-claimed. This is
-  the single ₹87.57 amount difference in the evaluation.
+  deducts that charge, so it is under-claimed rather than over-claimed.
+- **Rental.** Proven only with the device record (activation, free-until,
+  return date and pickup reference), the rental line and its batch and bank
+  credit. A month is owed back only if it started after the return or inside the
+  free period.
+- **Human authority.** A person may file an escalated case. The proof gate still
+  applies to everything the agent files alone; a human-filed correction carries a
+  `human_attestation` attachment with the reviewer's name, and the evaluation
+  counts it separately from agent claims.
 - **Materiality.** A proven case below ₹1 is held BATCHED, not discarded. Batched
   cases of one pattern are filed together once they reach ₹500.
 
@@ -102,4 +112,5 @@ on 15 Oct 2026.
   deterministic one (`test_a_reasoner_cannot_talk_its_way_past_the_gate`).
 - Filing an escalated case raises `ProofGateViolation` and logs `proof_gate.blocked`.
 - Every filed claim's proof hash equals its candidate's hash.
-- Red team: 24 of 24 scenarios, including 5 genuine controls, 0 false claims.
+- Red team: 32 of 32 scenarios, including 7 genuine controls, 0 false claims.
+- Only `Actor.HUMAN` can release an escalated case (`test_only_a_person_can_release_an_escalated_case`).

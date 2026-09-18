@@ -8,6 +8,7 @@ serialises anything that mutates it.
 from __future__ import annotations
 
 import threading
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from mfp.core.enums import Actor
 from mfp.demo.director import DemoDirector
-from mfp.runtime.views import case_detail, human_queue
+from mfp.runtime.views import case_detail, human_queue, late_settlements
 
 REPO = Path(__file__).resolve().parents[3]
 UI = REPO / "ui"
@@ -132,6 +133,27 @@ def queue() -> list[dict[str, Any]]:
         return human_queue(director().rt)
 
 
+@app.post("/api/cases/{case_id}/review")
+def review(case_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    with _lock:
+        d = director()
+        try:
+            d.rt.review(case_id, body.get("action", ""), body.get("reviewer") or "Merchant success desk",
+                        (body.get("note") or "").strip())
+        except KeyError:
+            raise HTTPException(404, f"No case {case_id}") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"case": case_detail(d.rt, case_id)["case"], "state": _state_payload(d)}
+
+
+@app.get("/api/late-settlements")
+def delays() -> dict[str, Any]:
+    with _lock:
+        d = director()
+        return late_settlements(d.rt, d.merchant_id)
+
+
 @app.get("/api/root-causes")
 def root_causes() -> list[dict[str, Any]]:
     with _lock:
@@ -148,13 +170,19 @@ def network() -> dict[str, Any]:
 
 
 # -- n8n calls back here for each lifecycle step it executes -------------------------------
+# Deliberately lock-free: the runtime holds its lock while it waits for n8n, and n8n
+# waits for this callback. Taking the lock here would deadlock the two. The engine
+# records the step on the event spine itself, from n8n's reply.
+
+_n8n_receipts: deque[dict[str, Any]] = deque(maxlen=2000)
 
 
 @app.post("/api/workflow/step")
 def workflow_step(body: dict[str, Any]) -> dict[str, Any]:
-    with _lock:
-        rt = director().rt
-        rt.events.append(Actor.WORKFLOW_ENGINE, "workflow.n8n.step", case_id=body.get("case_id"),
-                         merchant_id=body.get("merchant_id"), action=body.get("action"),
-                         claim_id=body.get("claim_id"), engine="n8n")
-        return {"ok": True, "received": body.get("action")}
+    _n8n_receipts.append({k: body.get(k) for k in ("action", "claim_id", "case_id", "merchant_id")})
+    return {"ok": True, "received": body.get("action")}
+
+
+@app.get("/api/workflow/receipts")
+def workflow_receipts() -> dict[str, Any]:
+    return {"count": len(_n8n_receipts), "recent": list(_n8n_receipts)[-20:]}

@@ -1,36 +1,47 @@
 # Settlement Teammate
 
-**An autonomous financial protection teammate for every Paytm merchant.**
+**Paytm checks every settlement for its merchants and fixes its own errors
+before anyone has to complain.**
 
-It doesn't wait for the merchant to discover a problem. It audits every
-settlement, proves every discrepancy from published rules, files the claim,
-chases the claims desk, confirms the money came back, and fixes the cause so
-it stops happening. When it cannot prove something, it hands it to a human
-instead of guessing.
+An autonomous teammate that audits every settlement a merchant receives, proves
+each discrepancy from published rules and the merchant's own agreement, files
+a correction with Paytm settlement ops, chases it, confirms the money came back,
+and fixes the cause so it stops. When it cannot prove something, it hands the
+case to a person instead of guessing.
+
+Why this is real: merchants' most common settlement complaints are unexplained
+deductions (soundbox/EDC rental after a device was returned, MDR above the
+agreed or regulated rate) and delayed settlements. Today the merchant has to
+notice, raise a ticket, and argue. Here nobody has to notice.
 
 Built for the Paytm Build for India AI Hackathon, Mumbai Edition, Track 3.
 
----
-
 ## What it did on the demo dataset
 
-Seed 42 · 25 merchants with full ledgers · 12 months · 394,532 transactions · 385,708 settlement lines.
+Seed 42 · 25 merchants with full ledgers · 12 months · 394,974 transactions ·
+385,888 settlement lines · 167 payment devices.
 
 | | |
 |---|---|
-| Discrepancies proven, unprompted | **₹2,26,055.91** across 365 cases |
-| Recovered | **₹1,85,875.89** |
-| Future leakage prevented | **₹31,847.89** |
-| Claims filed | 357, of which **0 were false** |
-| Legitimate lookalikes claimed | **0 of 23,648** |
-| Ambiguous charges escalated instead of claimed | **127 of 127** |
-| Filed amounts equal to the planted amount, to the paise | 356 of 357 |
-| Clean baseline (same ledger, nothing planted) | 0 proven · 0 claims · ₹0 recovered · 0 escalated |
-| Red team (24 adversarial scenarios incl. 5 genuine controls) | 24 correct · **0 false claims** |
+| Discrepancies proven, unprompted | **₹1,67,681.80** across 396 cases (19,323 charges) |
+| Recovered | **₹1,26,618.33** |
+| Future leakage prevented at the root cause | **₹1,22,033.05** |
+| Corrections filed | 389, of which **0 were false** |
+| Legitimate lookalikes corrected | **0 of 23,819** |
+| Ambiguous charges escalated instead of filed | **120 of 120** |
+| Late settlements reported (not claimed as money) | **597 of 597** |
+| Filed amounts equal to the planted amount, to the paise | 388 of 389 |
+| Clean baseline (same ledger, nothing planted) | 0 proven · 0 corrections · ₹0 · 0 escalated |
+| Red team (32 adversarial scenarios incl. 7 genuine controls) | 32 correct · **0 false corrections** |
 
-The hero merchant, Shree Ganesh Supermart: **₹41,112.91 found without being
-asked, ₹33,643.38 returned**, 7 cases held for human verification, 16 claims
-filed with evidence the agent learned from an earlier rejection.
+Seven discrepancy classes: wrong MDR band (incl. the RBI debit-card ceiling
+for small merchants), MDR on nil-charge instruments, GST base errors, TCS/TDS
+misapplied, refunds debited twice, payments missing from settlement, and
+device rental charged after return or inside the free period.
+
+The hero merchant, Shree Ganesh Supermart: **₹25,712.17 found without being
+asked, ₹23,252.93 returned**, ₹18,019.54 of future leakage stopped at the root
+cause, 7 cases held for human review, 33 late settlements reported.
 
 Every figure is computed by `python evaluate.py --seed 42` from generated
 records, agent decisions and workflow outcomes. None is typed into the UI.
@@ -71,7 +82,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (155, about 20 seconds):
+Tests (171, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -90,15 +101,43 @@ Each has a local fallback, and the demo never depends on it.
 | Integration | Enable | Fallback |
 |---|---|---|
 | Claude (investigation reasoning, reply interpretation) | `pip install -e ".[llm]"`, set `ANTHROPIC_API_KEY`, `MFP_LLM_MODE=record` once, then `replay` on stage | Deterministic reasoner |
-| n8n (claim lifecycle execution) | `docker compose up -d`, import `workflow/n8n/claim_lifecycle.json`, `MFP_WORKFLOW=n8n` | In-process workflow; fallback is logged |
+| n8n (claim lifecycle execution) | see below | In-process workflow; fallback is logged |
 | Cognee (case memory graph) | `pip install -e ".[memory]"`, configure Cognee's LLM, `MFP_MEMORY=cognee` | Local SQLite memory |
 | Sarvam (Hinglish/Hindi message and speech) | set `SARVAM_API_KEY` | Templated Hinglish |
 
-**Verified in this build:** the deterministic core, all three agents, local
-workflow, local memory, templated messaging, the UI and API, and n8n's
-fallback when unreachable. **Written but not exercised against live services**
-(no credentials were available): the Claude, Cognee and Sarvam adapters, and
-the n8n workflow import.
+**Verified live in this build:** n8n 2.39 in Docker executed every claim
+lifecycle step of a full run (submit, check, follow-up, re-present, withdraw)
+with zero fallbacks. **Written but not run against live services** (no
+credentials were available): the Claude, Cognee and Sarvam adapters. The demo
+and evaluation use their deterministic fallbacks, and a test proves the whole
+demo runs with every non-localhost connection blocked.
+
+#### Running with n8n
+
+```bash
+docker compose up -d
+```
+
+```bash
+MSYS_NO_PATHCONV=1 docker compose exec n8n n8n import:workflow --input=/workflows/claim_lifecycle.json
+```
+
+```bash
+MSYS_NO_PATHCONV=1 docker compose exec n8n n8n publish:workflow --id=mfpClaimLifecyc
+```
+
+```bash
+docker compose restart n8n
+```
+
+```bash
+MFP_WORKFLOW=n8n python serve.py --host 0.0.0.0
+```
+
+n8n calls back to the API at `host.docker.internal:8000`, so the API must
+listen on all interfaces while n8n is in use (`MSYS_NO_PATHCONV=1` only matters
+in Git Bash). Stop it afterwards, or allow port 8000 only from the Docker
+network in your firewall. `docker compose down` stops n8n.
 
 ---
 
@@ -147,7 +186,7 @@ src/mfp/reconciliation/  Reconciliation Engine, banking calendar
 src/mfp/proof/     Proof Engine
 src/mfp/cases/     case state machine
 src/mfp/agents/    Monitor, Investigation, Follow-up, reasoners
-src/mfp/workflow/  claims desk, local and n8n lifecycle executors
+src/mfp/workflow/  settlement-ops desk (simulated), local and n8n lifecycle executors
 src/mfp/memory/    SQLite and Cognee memory
 src/mfp/network/   signature emitter, pattern engine (k-anonymity)
 src/mfp/prevention/ root cause, future leakage
@@ -161,5 +200,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             155 tests including firewall canaries
+tests/             171 tests incl. firewall canaries and an offline rehearsal
 ```

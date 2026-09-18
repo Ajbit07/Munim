@@ -101,6 +101,16 @@ class ProcessorTariff:
         tcs = rules["TCS.ECO.CGST_52"]
         self.tcs_rate = Rate.from_percent(tcs["value_percent"])
         self.tcs_from = _d(tcs["effective_from"])
+        # RBI debit-card ceilings by previous-year turnover band.
+        self.debit_caps = []
+        for rule in rules.values():
+            if rule["rule_type"] == "MDR_CAP":
+                band = rule["scope"]["turnover_range"]
+                self.debit_caps.append((band.get("min_paise", 0), band.get("max_paise"),
+                                        Rate.from_percent(rule["value_percent"]), rule["cap_paise"], rule["rule_id"]))
+        large = next(c for c in self.debit_caps if c[1] is None)
+        self.large_debit_rate, self.large_debit_cap = large[2], large[3]
+
         tds = rules["TDS.ECO.194O"]
         self.tds_rate = Rate.from_percent(tds["value_percent"])
         self.tds_from = _d(tds["effective_from"])
@@ -118,6 +128,14 @@ class ProcessorTariff:
     def rupay_cc_rate(self, mcc: str) -> tuple[Rate, str]:
         return self.rupay_cc_by_mcc.get(mcc, self.rupay_cc_default)
 
+    def debit_ceiling(self, amount_paise: int, turnover_paise: int | None) -> tuple[int, str] | None:
+        if turnover_paise is None:
+            return None
+        for low, high, rate, cap, rule_id in self.debit_caps:
+            if turnover_paise >= low and (high is None or turnover_paise < high):
+                return min(self.pct(amount_paise, rate), cap), rule_id
+        return None
+
     def upi_nil_rule(self, amount_paise: int, on: date) -> str:
         if on >= self.small_value_protection_from and amount_paise <= self.small_value_ceiling:
             return "MDR.UPI_P2M.NIL.UPTO_2000"
@@ -134,6 +152,7 @@ class ProcessorTariff:
         mcc: str,
         rates: RateCard,
         upi_class: MerchantClass,
+        turnover: int | None = None,
     ) -> tuple[int, str | None]:
         """Return (mdr_paise, rule_id or agreement marker)."""
         if instrument in UPI_BANK_INSTRUMENTS:
@@ -176,7 +195,12 @@ class ProcessorTariff:
             Instrument.CARD_DEBIT: rates.card_debit,
             Instrument.NETBANKING: rates.netbanking,
         }[instrument]
-        return self.pct(amount_paise, Rate.from_percent(contract)), "AGREEMENT"
+        contracted = self.pct(amount_paise, Rate.from_percent(contract))
+        if instrument is Instrument.CARD_DEBIT:
+            ceiling = self.debit_ceiling(amount_paise, turnover)
+            if ceiling is not None and ceiling[0] < contracted:
+                return ceiling
+        return contracted, "AGREEMENT"
 
     def gst(self, instrument: Instrument, amount_paise: int, mdr_paise: int, on: date) -> tuple[int, str | None]:
         if mdr_paise == 0:
@@ -207,8 +231,10 @@ class ProcessorTariff:
         rates: RateCard,
         upi_class: MerchantClass,
         is_ecommerce_participant: bool,
+        turnover: int | None = None,
     ) -> Charges:
-        mdr, mdr_rule = self.mdr(instrument, amount_paise, on, mcc=mcc, rates=rates, upi_class=upi_class)
+        mdr, mdr_rule = self.mdr(instrument, amount_paise, on, mcc=mcc, rates=rates, upi_class=upi_class,
+                                 turnover=turnover)
         gst, gst_rule = self.gst(instrument, amount_paise, mdr, on)
         tcs, tds = self.taxes(amount_paise, on, is_ecommerce_participant=is_ecommerce_participant)
         return Charges(mdr=mdr, gst=gst, tcs=tcs, tds=tds, mdr_rule=mdr_rule, gst_rule=gst_rule)

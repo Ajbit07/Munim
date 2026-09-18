@@ -54,6 +54,14 @@ CITIES = ("Mumbai", "Pune", "Thane", "Nagpur", "Nashik", "Ahmedabad", "Bengaluru
 # Contract-rate negotiation ranges, in basis points (1 bp = 0.01%).
 CARD_CREDIT_BPS = (160, 200)
 CARD_DEBIT_BPS = (40, 90)
+CARD_DEBIT_BPS_SMALL = (30, 40)      # small merchants negotiate within the RBI 0.40% ceiling
+SMALL_MERCHANT_TURNOVER_PAISE = 20_00_000_00   # Rs 20 lakh, RBI/2017-18/105
+
+# Rented acceptance devices (payment soundboxes). Simulation parameters, not tariffs.
+DEVICE_PROBABILITY = 0.7
+DEVICE_RETURN_PROBABILITY = 0.15
+DEVICE_MONTHLY_RENTAL_PAISE = 19_900
+DEVICE_RENTAL_FREE_DAYS = 90
 NETBANKING_BPS = (120, 190)
 
 
@@ -72,10 +80,14 @@ class FaultProbabilities:
     tax_on_non_eco: float = 0.05             # L4
     duplicate_refund_debit: float = 0.15     # L5
     dropped_from_batch: float = 0.15         # L6
+    turnover_band_misapplied: float = 0.5    # L1c, small merchants only
+    rental_after_return: float = 0.5         # L7a, merchants whose device was returned
+    rental_during_waiver: float = 0.1        # L7b
+    settlement_delay: float = 0.15           # reported SLA breach
 
     @classmethod
     def none(cls) -> FaultProbabilities:
-        return cls(*([0.0] * 11))
+        return cls(*([0.0] * 15))
 
 
 # Acquirer-wide fault start dates. Single dates, so they surface as systemic.
@@ -99,6 +111,10 @@ class HeroScenario:
     duplicate_refund_from: date = date(2026, 3, 1)
     dropped_from_batch_from: date = date(2025, 12, 1)
     dropped_payment_probability: float = 0.0002
+    device_activated_on: date = date(2025, 3, 1)
+    device_returned_on: date = date(2026, 4, 10)
+    settlement_delay_from: date = date(2026, 6, 1)
+    settlement_delay_probability: float = 0.003
 
 
 @dataclass(frozen=True)
@@ -119,6 +135,8 @@ class GenerationParams:
     noise_credit_probability: float = 0.05
     dropped_payment_probability: float = 0.002
     duplicate_refund_probability: float = 0.02
+    reversal_probability: float = 0.001
+    settlement_delay_probability: float = 0.01
     out_dir: Path = Path("data/generated")
     hero: HeroScenario = field(default_factory=HeroScenario)
 

@@ -283,12 +283,29 @@ def test_every_plant_points_at_observed_evidence(runs, leaky):
     for plant in plants:
         components_by_txn[plant["txn_id"]].add(plant["component"])
     txns = leaky.transactions_by_id
+    devices = {d.device_id: d for d in leaky.devices}
+    rentals = {line.charge_ref: line for line in leaky.settlement_lines if line.line_type == "RENTAL"}
     for plant in plants:
+        if plant["component"] == "RENTAL":
+            device_id, month = plant["txn_id"].rsplit(":", 1)
+            device = devices[device_id]
+            line = rentals[plant["txn_id"]]
+            assert -line.net_paise == plant["charged_paise"] == device.monthly_rental_paise
+            first = date.fromisoformat(month + "-01")
+            if plant["subtype"] == "L7a":
+                assert device.returned_on is not None and device.returned_on < first
+            else:
+                assert first <= device.rental_free_until
+            continue
         assert plant["txn_id"] in txns
         lines = lines_by_txn.get(plant["txn_id"], [])
         component = plant["component"]
         if component == "SETTLEMENT":
             assert lines == [], "a dropped payment must be absent from every batch"
+            continue
+        if component == "DELAY":
+            assert plant["expected_action"] == "REPORT" and plant["correct_paise"] is None
+            assert len(lines) <= 1, "a late payment still settles exactly once"
             continue
         if component == "REFUND_DEBIT":
             assert len(lines) == 2 and lines[0].batch_id != lines[1].batch_id
@@ -334,14 +351,15 @@ def test_claim_plants_are_positive_and_consistent(runs):
             assert plant["amount_paise"] == plant["charged_paise"] - plant["correct_paise"]
 
 
-def test_all_six_discrepancy_classes_are_planted_at_scale():
+def test_all_seven_discrepancy_classes_and_delays_are_planted_at_scale():
     """Uses the committed seed-42 dataset when present; skipped otherwise."""
     path = Path(__file__).resolve().parents[1] / "data" / "generated" / "seed-42" / HIDDEN_DIR / TRUTH_FILE
     if not path.exists():
         pytest.skip("seed-42 dataset not generated")
     kinds = {p["discrepancy_type"] for p in json.loads(path.read_text(encoding="utf-8"))["plants"]}
     assert kinds == {"L1_WRONG_MDR_BAND", "L2_NIL_MDR_VIOLATION", "L3_GST_BASE_ERROR",
-                     "L4_TAX_MISAPPLICATION", "L5_ORPHAN_REFUND", "L6_UNSETTLED_TRANSACTION"}
+                     "L4_TAX_MISAPPLICATION", "L5_ORPHAN_REFUND", "L6_UNSETTLED_TRANSACTION",
+                     "L7_DEVICE_RENTAL", "SETTLEMENT_DELAY"}
 
 
 def test_network_signatures_carry_no_merchant_identity(leaky):

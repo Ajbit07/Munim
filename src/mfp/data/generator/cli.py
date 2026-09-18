@@ -40,6 +40,7 @@ OBSERVED_FILES = (
     "settlement_lines.jsonl",
     "bank_credits.jsonl",
     "network_signatures.jsonl",
+    "devices.jsonl",
 )
 
 
@@ -90,6 +91,7 @@ def generate(params: GenerationParams, config_dir: Path = DEFAULT_CONFIG_DIR) ->
         rows["merchants.jsonl"].append(world.merchant)
         rows["agreements.jsonl"].append(world.agreement)
         rows["processor_config.jsonl"].extend(world.snapshots)
+        rows["devices.jsonl"].extend(world.devices)
         truth.fault_profiles.extend(world.faults)
         if not world.is_full:
             continue

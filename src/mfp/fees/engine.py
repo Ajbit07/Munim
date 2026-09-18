@@ -132,9 +132,26 @@ class FeeEngine:
     def _query(self, types, instrument, amount, on, merchant: Merchant) -> Rule:
         return self.rules.resolve(RuleQuery(
             rule_types=types, on=on, instrument=instrument, amount_paise=amount,
-            mcc=merchant.registered_mcc, merchant_class=MerchantClass(merchant.upi_class),
+            mcc=merchant.registered_mcc, merchant_class=self.merchant_class(merchant, on),
             acquirer=merchant.acquirer_id, is_ecommerce_participant=merchant.is_ecommerce_participant,
+            annual_turnover_paise=merchant.annual_turnover_paise,
         ))
+
+    # Classification hook: the runtime installs a rolling P2PM/P2M classifier.
+    classifier = None
+
+    def merchant_class(self, merchant: Merchant, on: date) -> MerchantClass:
+        if self.classifier is not None:
+            return self.classifier(merchant, on)
+        return MerchantClass(merchant.upi_class)
+
+    def debit_cap(self, amount: int, on: date, merchant: Merchant) -> tuple[ByPolicy, RuleRef] | None:
+        """RBI turnover-band ceiling for debit card MDR, if one applies."""
+        try:
+            rule = self._query(frozenset({RuleType.MDR_CAP}), Instrument.CARD_DEBIT, amount, on, merchant)
+        except RuleResolutionError:
+            return None
+        return self._apply_rule(rule, amount), _ref(rule)
 
     @staticmethod
     def agreement_on(agreements: list[MerchantAgreement], on: date) -> MerchantAgreement | None:
@@ -167,7 +184,13 @@ class FeeEngine:
             }[instrument]
             ref = RuleRef(f"AGREEMENT:{agreement.agreement_id}", "AGREEMENT", True,
                           f"{instrument} at {percent}% per agreement signed {agreement.signed_on}")
-            return _pct(amount, Rate.from_percent(percent)), ref
+            contracted = _pct(amount, Rate.from_percent(percent))
+            if instrument is Instrument.CARD_DEBIT:
+                cap = self.debit_cap(amount, on, merchant)
+                if cap is not None and cap[0][self.configured_policy] < contracted[self.configured_policy]:
+                    # A contract above the regulatory ceiling cannot be enforced; the ceiling governs.
+                    return ByPolicy({p: min(contracted[p], cap[0][p]) for p in POLICIES}), cap[1]
+            return contracted, ref
         try:
             rule = self._query(_MDR_TYPES, instrument, amount, on, merchant)
         except RuleResolutionError as exc:
@@ -270,14 +293,20 @@ class FeeEngine:
             else:
                 mdr_amount = ByPolicy.const(mdr + gst) - (exp.mdr + exp.gst)
             if mdr_amount[cfg] > 0:
+                cap = self.debit_cap(amount, on, merchant) if instrument is Instrument.CARD_DEBIT else None
                 if exp.mdr_rule.rule_type == str(RuleType.NIL_PROTECTION):
                     pattern, dtype = "mdr_on_protected_instrument", "L2_NIL_MDR_VIOLATION"
+                elif cap is not None and mdr > cap[0][cfg]:
+                    # Charged above the RBI ceiling for this merchant's turnover band.
+                    pattern, dtype = "mdr_above_turnover_cap", "L1_WRONG_MDR_BAND"
+                    exp_rule = cap[1]
                 elif instrument in CONTRACTUAL:
                     pattern, dtype = "mdr_above_agreement", "L1_WRONG_MDR_BAND"
                 else:
                     pattern, dtype = "mdr_above_mcc_rate", "L1_WRONG_MDR_BAND"
+                rule_used = exp_rule if pattern == "mdr_above_turnover_cap" else exp.mdr_rule
                 found.append(Component("MDR", mdr_amount, mdr + min(gst, gst_on_actual[cfg]),
-                                       exp.mdr + exp.gst, exp.mdr_rule, pattern, dtype))
+                                       exp.mdr + exp.gst, rule_used, pattern, dtype))
             if gst_excess[cfg] > 0 and exp.gst_rule is not None:
                 pattern = "gst_on_exempt_settlement" if exp.gst_exempt else "gst_above_standard_base"
                 found.append(Component("GST", gst_excess, gst, gst_on_actual, exp.gst_rule,

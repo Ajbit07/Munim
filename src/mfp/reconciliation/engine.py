@@ -29,8 +29,8 @@ from datetime import date, time
 from mfp.core.enums import Instrument
 from mfp.data.store import MerchantView
 from mfp.fees.engine import ByPolicy, FeeEngine, Unresolved
-from mfp.reconciliation.calendar import add_banking_days, settlement_cycle
-from mfp.schemas.ledger import LineType, TxnKind, TxnStatus
+from mfp.reconciliation.calendar import add_banking_days, banking_days_between, settlement_cycle
+from mfp.schemas.ledger import DEBIT_LINE_TYPES, Device, LineType, TxnKind, TxnStatus
 
 
 @dataclass
@@ -60,6 +60,30 @@ class Finding:
 
 
 @dataclass
+class SlaBreach:
+    """A payment that settled after its contracted date plus grace. Reported, not claimed."""
+
+    merchant_id: str
+    txn_id: str
+    captured_on: date
+    due_on: date
+    deadline: date
+    settled_on: date
+    banking_days_late: int
+    net_paise: int
+    batch_id: str
+
+
+def rental_month_status(device: Device, month: date) -> str:
+    """CHARGEABLE, or why the month is not chargeable under the device terms."""
+    if device.returned_on is not None and month >= device.returned_on:
+        return "rental_after_return"
+    if month < device.rental_free_until:
+        return "rental_during_waiver"
+    return "CHARGEABLE"
+
+
+@dataclass
 class IntegrityIssue:
     kind: str
     batch_id: str
@@ -78,6 +102,7 @@ class ReconciliationReport:
     awaiting_cycle: int = 0
     findings: list[Finding] = field(default_factory=list)
     integrity_issues: list[IntegrityIssue] = field(default_factory=list)
+    sla_breaches: list[SlaBreach] = field(default_factory=list)
     months: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -87,11 +112,25 @@ class ReconciliationEngine:
         self.cutoff = time.fromisoformat(settlement_rules["default_merchant_sla"]["cutoff_local_time"])
         self.default_sla = settlement_rules["default_merchant_sla"]["settlement_days"]
         self.grace = settlement_rules["lifecycle"]["unsettled_after_sla_days"]
+        self._dates: dict[tuple, date] = {}
+        self.holidays = frozenset(
+            date.fromisoformat(d) for d in settlement_rules.get("holiday_calendar", {}).get("national_holidays", []))
 
     def due_date(self, view: MerchantView, captured_at) -> date:
-        agreement = self.fees.agreement_on(view.agreements, captured_at.date())
-        sla = agreement.settlement_sla_days if agreement else self.default_sla
-        return add_banking_days(settlement_cycle(captured_at, self.cutoff), sla)
+        cycle = settlement_cycle(captured_at, self.cutoff)
+        key = (view.merchant_id, cycle, "due")
+        if key not in self._dates:
+            agreement = self.fees.agreement_on(view.agreements, captured_at.date())
+            sla = agreement.settlement_sla_days if agreement else self.default_sla
+            self._dates[key] = add_banking_days(cycle, sla, self.holidays)
+        return self._dates[key]
+
+    def deadline(self, view: MerchantView, captured_at) -> date:
+        cycle = settlement_cycle(captured_at, self.cutoff)
+        key = (view.merchant_id, cycle, "deadline")
+        if key not in self._dates:
+            self._dates[key] = add_banking_days(self.due_date(view, captured_at), self.grace, self.holidays)
+        return self._dates[key]
 
     def reconcile(self, view: MerchantView, as_of: date, *, settled_after: date | None = None) -> ReconciliationReport:
         """Reconcile batches settled in (settled_after, as_of], and payments falling due in that window.
@@ -141,12 +180,21 @@ class ReconciliationEngine:
             for line in view.lines_by_batch.get(batch.batch_id, []):
                 report.lines_scanned += 1
                 months[f"{batch.settlement_date:%Y-%m}"]["lines"] += 1
-                if line.line_type in (LineType.REFUND, LineType.CHARGEBACK):
+                if line.line_type in DEBIT_LINE_TYPES:
                     refund_lines[line.txn_id].append(line)
+                    continue
+                if line.line_type is LineType.RENTAL:
+                    self._check_rental(view, batch, line, report)
                     continue
                 if line.line_type is not LineType.PAYMENT or line.instrument is None:
                     continue
                 on = line.captured_at.date()
+                deadline = self.deadline(view, line.captured_at)
+                if batch.settlement_date > deadline:
+                    report.sla_breaches.append(SlaBreach(
+                        view.merchant_id, line.txn_id, on, self.due_date(view, line.captured_at), deadline,
+                        batch.settlement_date, banking_days_between(deadline, batch.settlement_date, self.holidays),
+                        line.net_paise, batch.batch_id))
                 result = self.fees.decompose(
                     line.instrument, line.gross_paise, on, merchant, view.agreements,
                     mdr=line.mdr_paise, gst=line.gst_paise, tcs=line.tcs_paise, tds=line.tds_paise,
@@ -174,7 +222,7 @@ class ReconciliationEngine:
         for txn_id in refund_lines:
             txn = view.transactions_by_id.get(txn_id)
             history = [l for l in view.lines_by_txn.get(txn_id, [])
-                       if l.batch_id in visible_ids and l.line_type in (LineType.REFUND, LineType.CHARGEBACK)]
+                       if l.batch_id in visible_ids and l.line_type in DEBIT_LINE_TYPES]
             ordered = sorted(history, key=lambda l: (view.batches_by_id[l.batch_id].settlement_date, l.line_id))
             if txn is None or txn.kind is TxnKind.PAYMENT:
                 suspects = ordered
@@ -195,8 +243,7 @@ class ReconciliationEngine:
                 continue
             if any(l.batch_id in batch_ids for l in view.lines_by_txn.get(txn.txn_id, [])):
                 continue
-            due = self.due_date(view, txn.captured_at)
-            deadline = add_banking_days(due, self.grace)
+            deadline = self.deadline(view, txn.captured_at)
             if deadline > through:
                 report.awaiting_cycle += 1
                 continue
@@ -215,6 +262,23 @@ class ReconciliationEngine:
             months[finding.month]["findings"] += 1
         report.months = {k: dict(v) for k, v in sorted(months.items())}
         return report
+
+    @staticmethod
+    def _check_rental(view: MerchantView, batch, line, report: ReconciliationReport) -> None:
+        device_id, _, month_text = (line.charge_ref or "").partition(":")
+        month = date.fromisoformat(f"{month_text}-01") if month_text else batch.settlement_date
+        device = view.devices_by_id.get(device_id)
+        if device is None:
+            report.findings.append(Finding(
+                view.merchant_id, "L7_DEVICE_RENTAL", "rental_after_return", "RENTAL", line.charge_ref or line.line_id,
+                month, None, "CONTRACT.DEVICE.RENTAL_TERMS", ByPolicy.const(-line.gross_paise), (line.line_id,),
+                (batch.batch_id,), unresolved_reason=f"no device record for {device_id}"))
+            return
+        status = rental_month_status(device, month)
+        if status != "CHARGEABLE":
+            report.findings.append(Finding(
+                view.merchant_id, "L7_DEVICE_RENTAL", status, "RENTAL", line.charge_ref, month, None,
+                "CONTRACT.DEVICE.RENTAL_TERMS", ByPolicy.const(-line.gross_paise), (line.line_id,), (batch.batch_id,)))
 
     @staticmethod
     def _refund_finding(view: MerchantView, line, pattern: str, all_lines) -> Finding:

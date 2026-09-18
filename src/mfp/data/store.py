@@ -16,6 +16,7 @@ from pathlib import Path
 from mfp.schemas.network import NetworkSignature
 from mfp.schemas.ledger import (
     BankCredit,
+    Device,
     Merchant,
     MerchantAgreement,
     ProcessorConfigSnapshot,
@@ -33,6 +34,7 @@ OBSERVED = {
     "settlement_lines": ("settlement_lines.jsonl", SettlementLine),
     "bank_credits": ("bank_credits.jsonl", BankCredit),
     "network_signatures": ("network_signatures.jsonl", NetworkSignature),
+    "devices": ("devices.jsonl", Device),
 }
 
 
@@ -99,6 +101,11 @@ class ObservedDataset:
     def network_signatures(self) -> tuple[NetworkSignature, ...]:
         return self._load("network_signatures")
 
+    @cached_property
+    def devices(self) -> tuple[Device, ...]:
+        # Older datasets predate device records; they simply have none.
+        return self._load("devices") if (self.root / OBSERVED["devices"][0]).exists() else ()
+
     # -- convenience indexes ---------------------------------------------
 
     @cached_property
@@ -133,7 +140,7 @@ class MerchantView:
     """
 
     def __init__(self, merchant: Merchant, agreements, processor_config, transactions,
-                 settlement_batches, settlement_lines, bank_credits) -> None:
+                 settlement_batches, settlement_lines, bank_credits, devices=()) -> None:
         self.merchant = merchant
         self.merchant_id = merchant.merchant_id
         self.agreements = list(agreements)
@@ -142,15 +149,20 @@ class MerchantView:
         self.settlement_batches = sorted(settlement_batches, key=lambda b: b.settlement_date)
         self.settlement_lines = list(settlement_lines)
         self.bank_credits = list(bank_credits)
+        self.devices = list(devices)
+        self.devices_by_id = {d.device_id: d for d in self.devices}
         self.transactions_by_id = {t.txn_id: t for t in self.transactions}
         self.batches_by_id = {b.batch_id: b for b in self.settlement_batches}
         self.credits_by_utr = {c.utr: c for c in self.bank_credits}
         self.lines_by_txn: dict[str, list[SettlementLine]] = defaultdict(list)
         self.lines_by_batch: dict[str, list[SettlementLine]] = defaultdict(list)
+        self.lines_by_charge: dict[str, list[SettlementLine]] = defaultdict(list)
         for line in self.settlement_lines:
             self.lines_by_batch[line.batch_id].append(line)
             if line.txn_id:
                 self.lines_by_txn[line.txn_id].append(line)
+            if line.charge_ref:
+                self.lines_by_charge[line.charge_ref].append(line)
 
     def snapshot_on(self, on):
         current = None
@@ -164,7 +176,7 @@ class MerchantIndex:
     """Groups a dataset's raw rows by merchant in a single pass per file."""
 
     GROUPED = ("agreements", "processor_config", "transactions", "settlement_batches",
-               "settlement_lines", "bank_credits")
+               "settlement_lines", "bank_credits", "devices")
 
     def __init__(self, dataset: ObservedDataset) -> None:
         self.dataset = dataset
@@ -174,6 +186,9 @@ class MerchantIndex:
         if key not in self._raw:
             filename, _ = OBSERVED[key]
             grouped: dict[str, list[str]] = defaultdict(list)
+            if not (self.dataset.root / filename).exists():
+                self._raw[key] = grouped  # older datasets predate this artifact
+                return grouped
             with _guard(self.dataset.root / filename).open("r", encoding="utf-8") as handle:
                 for line in handle:
                     start = line.find(_MERCHANT_KEY)
@@ -198,4 +213,5 @@ class MerchantIndex:
         return MerchantView(
             self.dataset.merchant(merchant_id), rows("agreements"), rows("processor_config"),
             rows("transactions"), rows("settlement_batches"), rows("settlement_lines"), rows("bank_credits"),
+            rows("devices"),
         )

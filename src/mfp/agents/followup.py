@@ -53,9 +53,10 @@ class FollowUpAgent:
         problems = []
         if case.state is not S.ACTION_PENDING:
             problems.append(f"case is {case.state}, not ACTION_PENDING")
-        if case.proof is None or not case.proof.authorises_claim:
+        human = case.human_attestation is not None
+        if not human and (case.proof is None or not case.proof.authorises_claim):
             problems.append("no PROVEN proof authorises this claim")
-        if case.proof is not None and case.candidate is not None and case.proof.input_hash != case.candidate.input_hash():
+        if not human and case.proof is not None and case.candidate is not None and case.proof.input_hash != case.candidate.input_hash():
             problems.append("the proof was computed from a different candidate")
         if problems:
             self.rt.events.append(ACTOR, "proof_gate.blocked", case_id=case.case_id, merchant_id=case.merchant_id,
@@ -64,9 +65,35 @@ class FollowUpAgent:
 
     # -- filing -----------------------------------------------------------------
 
+    def settled_since(self, case: Case) -> str | None:
+        """For a missing-payment case, the batch that has since carried the payment, if any."""
+        if case.component != "SETTLEMENT":
+            return None
+        view = self.rt.view(case.merchant_id)
+        through = self.rt.observed_through()
+        for txn_id in case.txn_ids:
+            for line in view.lines_by_txn.get(txn_id, []):
+                batch = view.batches_by_id.get(line.batch_id)
+                if batch is not None and batch.settlement_date <= through:
+                    return f"{txn_id} settled in {batch.batch_id} on {batch.settlement_date}"
+        return None
+
+    def withdraw(self, case: Case, reason: str) -> None:
+        rt = self.rt
+        claim = self.claims.get(case.claim_id) if case.claim_id else None
+        if claim is not None:
+            rt.workflow.withdraw(claim, reason)
+        rt.state_machine.transition(case, S.WITHDRAWN, ACTOR, f"Payment arrived late ({reason}); claim withdrawn",
+                                    decision="withdraw", action="SLA breach reported instead of a money claim")
+        rt.remember(case)
+
     def file(self, case: Case) -> Claim | None:
         rt = self.rt
         self._assert_gate(case)
+        late = self.settled_since(case)
+        if late:
+            self.withdraw(case, late)
+            return None
 
         outcomes = rt.memory.pattern_outcomes(case.pattern)
         succeeded = outcomes.get("APPROVED", 0) + outcomes.get("PARTIALLY_APPROVED", 0)
@@ -83,13 +110,15 @@ class FollowUpAgent:
 
         learned = rt.memory.winning_attachments(case.pattern)
         attachments = set(BASE_ATTACHMENTS) | learned
+        if case.human_attestation:
+            attachments.add("human_attestation")
         view = rt.view(case.merchant_id)
         captures = [view.transactions_by_id[t].captured_at.date() for t in case.txn_ids if t in view.transactions_by_id]
         self._seq += 1
         claim = Claim(
             claim_id=f"CLM-{self._seq:05d}", case_id=case.case_id, merchant_id=case.merchant_id,
             proof_id=case.proof.proof_id, discrepancy_type=case.discrepancy_type, pattern=case.pattern,
-            amount_paise=case.proof.discrepancy_paise, oldest_capture=min(captures) if captures else rt.clock.today(),
+            amount_paise=case.claimed_paise, oldest_capture=min(captures) if captures else rt.clock.today(),
             attachments=attachments,
             evidence={"proof": case.proof.proof_id, "rules": list(case.proof.rule_ids),
                       "records": len(case.proof.source_records), "transactions": len(case.txn_ids)},
@@ -97,8 +126,10 @@ class FollowUpAgent:
         self.claims[claim.claim_id] = claim
         case.claim_id = claim.claim_id
         reference = rt.workflow.submit(claim)
+        authority = (f"on the authority of {case.human_attestation['reviewer']}" if case.human_attestation
+                     else "on the Proof Engine's verdict")
         rt.state_machine.transition(
-            case, S.FILED, ACTOR, f"Claim {claim.claim_id} filed for Rs {claim.amount_paise / 100:,.2f}",
+            case, S.FILED, ACTOR, f"Claim {claim.claim_id} filed for Rs {claim.amount_paise / 100:,.2f} {authority}",
             tool=f"workflow.{rt.workflow.name}.submit", action="claim filed", result=reference,
             evidence=sorted(attachments),
             learned_attachments=sorted(learned), memory_applied=bool(learned),
@@ -122,6 +153,10 @@ class FollowUpAgent:
         rt = self.rt
         sm = rt.state_machine
         claim = self.claims[case.claim_id]
+        late = self.settled_since(case)
+        if late:
+            self.withdraw(case, late)
+            return
         response = rt.workflow.check(claim)
 
         if response is None:

@@ -52,8 +52,11 @@ class Scenario:
     acquirer: str = "ACQ-A"
     sla: int = 1
     agreements: list[tuple[str, str, str, str]] = field(default_factory=lambda: [("2024-01-01", "1.60", "0.50", "1.50")])
+    turnover: int = 1_00_00_000_00          # Rs 1 crore previous-year turnover unless a scenario says otherwise
     payments: list[dict] = field(default_factory=list)
     refunds: list[dict] = field(default_factory=list)
+    devices: list[dict] = field(default_factory=list)
+    rentals: list[tuple[str, str]] = field(default_factory=list)   # (device_id, "YYYY-MM") debited
 
     def pay(self, when: str, instrument: str, amount: int, mdr: int = 0, gst: int = 0, tcs: int = 0, tds: int = 0,
             *, late_days: int = 0, drop: bool = False, failed: bool = False, ref: str | None = None) -> Scenario:
@@ -63,6 +66,14 @@ class Scenario:
 
     def refund(self, parent_ref: str, when: str, amount: int, *, kind: str = "REFUND", debits: int = 1) -> Scenario:
         self.refunds.append(dict(parent=parent_ref, when=when, amount=amount, kind=kind, debits=debits))
+        return self
+
+    def device(self, activated: str, free_until: str, returned: str | None = None) -> Scenario:
+        self.devices.append(dict(activated_on=activated, rental_free_until=free_until, returned_on=returned))
+        return self
+
+    def rent(self, month: str) -> Scenario:
+        self.rentals.append((len(self.devices) - 1, month))
         return self
 
 
@@ -126,6 +137,31 @@ def scenarios() -> list[Scenario]:
                  "A half-paise MDR rounded up is a rounding convention, not an overcharge")
         .pay("2026-08-20T12:00", "CARD_DEBIT", amount, pct(amount, "0.50"), pct(pct(amount, "0.50"), "18")))
 
+    small = 12_00_000_00  # Rs 12 lakh previous-year turnover: RBI small-merchant band
+    sc = Scenario("small_merchant_debit_within_ceiling", "DO_NOT_CLAIM", "L1",
+                  "Small merchant charged 0.40% on a debit card: exactly the RBI ceiling", turnover=small)
+    sc.agreements = [("2024-01-01", "1.60", "0.40", "1.50")]
+    add(sc.pay("2026-08-18T12:00", "CARD_DEBIT", 300_000, pct(300_000, "0.40"), pct(pct(300_000, "0.40"), "18")))
+    add(Scenario("rental_in_an_active_month", "DO_NOT_CLAIM", "L7",
+                 "Soundbox rental debited for a month the device was in use")
+        .device("2025-01-10", "2025-04-10").rent("2026-08"))
+    add(Scenario("rental_for_the_month_of_return", "DO_NOT_CLAIM", "L7",
+                 "Rental billed on 1 Aug for a device returned on 20 Aug is chargeable")
+        .device("2025-01-10", "2025-04-10", "2026-08-20").rent("2026-08"))
+    add(Scenario("reversal_debited_once", "DO_NOT_CLAIM", "L5", "A network reversal debited once is legitimate")
+        .pay("2026-08-03T12:00", "CARD_CREDIT", 280_000, pct(280_000, "1.60"), pct(pct(280_000, "1.60"), "18"), ref="P1")
+        .refund("P1", "2026-08-05T12:00", 280_000, kind="REVERSAL"))
+    p2pm = Scenario("p2pm_merchant_reclassified_after_three_months", "DO_NOT_CLAIM", "L2",
+                    "A small (P2PM) merchant above Rs 1 lakh of UPI a month for three months is P2M from then on, "
+                    "so the 0.4% UPI MDR after 15 Oct is legitimate", upi_class="P2PM")
+    for month in ("07", "08", "09"):
+        for day in ("05", "12", "19"):
+            p2pm.pay(f"2026-{month}-{day}T12:00", "UPI_P2M_BANK", 4_000_000)
+    add(p2pm.pay("2026-10-20T12:00", "UPI_P2M_BANK", 300_000, 1_200, pct(1_200, "18")))
+    add(Scenario("late_settlement_beyond_grace", "DO_NOT_CLAIM", "L6",
+                 "Settled five banking days late: a reportable SLA breach, but no money is owed")
+        .pay("2026-09-07T12:00", "UPI_P2M_BANK", 150_000, late_days=5))
+
     # -- controls: genuine discrepancies -------------------------------------------------
     add(Scenario("control_upi_mdr_before_oct15", "CLAIM", "control",
                  "0.4% UPI MDR charged on 1 Sep 2026, before its effective date")
@@ -138,6 +174,13 @@ def scenarios() -> list[Scenario]:
     add(Scenario("control_duplicate_refund", "CLAIM", "control", "One refund debited twice")
         .pay("2026-09-14T12:00", "UPI_P2M_BANK", 300_000, ref="P1")
         .refund("P1", "2026-09-15T12:00", 150_000, debits=2))
+    sc = Scenario("control_small_merchant_priced_as_large", "CLAIM", "control",
+                  "Small merchant charged the 0.90% large-merchant debit ceiling", turnover=12_00_000_00)
+    sc.agreements = [("2024-01-01", "1.60", "0.40", "1.50")]
+    add(sc.pay("2026-08-18T12:00", "CARD_DEBIT", 300_000, pct(300_000, "0.90"), pct(pct(300_000, "0.90"), "18")))
+    add(Scenario("control_rental_after_return", "CLAIM", "control",
+                 "Soundbox returned on 10 Jul, rental still debited in September")
+        .device("2025-01-10", "2025-04-10", "2026-07-10").rent("2026-09"))
     add(Scenario("control_dropped_payment", "CLAIM", "control", "A payment missing from every batch")
         .pay("2026-09-16T12:00", "UPI_P2M_BANK", 450_000, drop=True)
         .pay("2026-09-16T12:10", "UPI_P2M_BANK", 20_000)
@@ -154,7 +197,7 @@ def write_dataset(out_dir: Path) -> Path:
     root = Path(out_dir) / "redteam"
     (root / HIDDEN).mkdir(parents=True, exist_ok=True)
     files = {n: [] for n in ("merchants", "agreements", "processor_config", "transactions",
-                             "settlement_batches", "settlement_lines", "bank_credits", "network_signatures")}
+                             "settlement_batches", "settlement_lines", "bank_credits", "network_signatures", "devices")}
     expectations = []
     utr = 0
     for i, sc in enumerate(scenarios(), start=1):
@@ -164,7 +207,7 @@ def write_dataset(out_dir: Path) -> Path:
         files["merchants"].append({"merchant_id": mid, "legal_name": f"Red Team {sc.key}", "registered_mcc": sc.mcc,
                                    "city": "Mumbai", "acquirer_id": sc.acquirer, "fidelity": "FULL",
                                    "onboarded_on": "2024-01-01", "is_ecommerce_participant": sc.eco,
-                                   "upi_class": sc.upi_class})
+                                   "upi_class": sc.upi_class, "annual_turnover_paise": sc.turnover})
         for n, (signed, credit, debit, nb) in enumerate(sc.agreements, start=1):
             files["agreements"].append({"agreement_id": f"AGR-{mid}-{n}", "merchant_id": mid, "signed_on": signed,
                                         "settlement_sla_days": sc.sla, "card_credit_rate_percent": credit,
@@ -213,6 +256,18 @@ def write_dataset(out_dir: Path) -> Path:
                                                     "captured_at": captured.isoformat(), "gross_paise": -r["amount"],
                                                     "mdr_paise": 0, "gst_paise": 0, "tcs_paise": 0, "tds_paise": 0,
                                                     "net_paise": -r["amount"]})
+        for n, dev in enumerate(sc.devices, start=1):
+            files["devices"].append({"device_id": f"SBX-{mid}-{n}", "merchant_id": mid, "device_type": "SOUNDBOX",
+                                     "monthly_rental_paise": 19_900, "activated_on": dev["activated_on"],
+                                     "rental_free_until": dev["rental_free_until"], "returned_on": dev["returned_on"],
+                                     "return_ref": f"RET-{mid}-{n}" if dev["returned_on"] else None})
+        for dev_index, month in sc.rentals:
+            first = date.fromisoformat(f"{month}-01")
+            debit_on = first if first.weekday() < 5 else banking_add(first, 1)
+            by_date.setdefault(debit_on, []).append({
+                "txn_id": None, "line_type": "RENTAL", "instrument": None, "captured_at": None,
+                "gross_paise": -19_900, "mdr_paise": 0, "gst_paise": 0, "tcs_paise": 0, "tds_paise": 0,
+                "net_paise": -19_900, "charge_ref": f"SBX-{mid}-{dev_index + 1}:{month}"})
         for day in sorted(by_date):
             batch_id = f"STL-{mid}-{day:%Y%m%d}"
             lines = by_date[day]
@@ -229,7 +284,9 @@ def write_dataset(out_dir: Path) -> Path:
                                                 "utr": batch_utr, "carried_forward": totals["net_paise"] < 0})
             for n, line in enumerate(lines, start=1):
                 files["settlement_lines"].append({"line_id": f"{batch_id}-L{n:05d}", "batch_id": batch_id,
-                                                  "merchant_id": mid, "ref_batch_id": None, **line})
+                                                  "merchant_id": mid, "ref_batch_id": None,
+                                                  "charge_ref": line.get("charge_ref"),
+                                                  **{k: v for k, v in line.items() if k != "charge_ref"}})
 
     manifest = {"dataset": "redteam", "as_of": AS_OF.isoformat(), "window_start": "2026-01-01", "seed": 0,
                 "generator_version": "redteam-1", "months": 10, "files": {}}

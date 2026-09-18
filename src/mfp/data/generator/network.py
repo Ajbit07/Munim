@@ -36,7 +36,11 @@ _SHAPE: dict[Fault, tuple[str, Instrument | None, str, float, float]] = {
     Fault.TAX_ON_NON_ECO: ("tax_on_non_eco_flow", None, "TCS.PA_FLOW.NOT_APPLICABLE", 1.0, 5.4),
     Fault.DUPLICATE_REFUND_DEBIT: ("refund_debited_twice", None, "RECON.REFUND.SINGLE_DEBIT", 0.0003, 900.0),
     Fault.DROPPED_FROM_BATCH: ("payment_missing_from_settlement", None, "RECON.PAYMENT.SETTLED_ONCE", 0.002, 850.0),
+    Fault.TURNOVER_BAND_MISAPPLIED: ("mdr_above_turnover_cap", Instrument.CARD_DEBIT, "MDR_CAP.DEBIT_CARD.SMALL_MERCHANT", 1.0, 1.4),
+    Fault.RENTAL_AFTER_RETURN: ("rental_after_return", None, "CONTRACT.DEVICE.RENTAL_TERMS", 0.0, 199.0),
+    Fault.RENTAL_DURING_WAIVER: ("rental_during_waiver", None, "CONTRACT.DEVICE.RENTAL_TERMS", 0.0, 199.0),
 }
+_MONTHLY = frozenset({Fault.RENTAL_AFTER_RETURN, Fault.RENTAL_DURING_WAIVER})
 
 
 def _month_starts(start: date, end: date):
@@ -56,6 +60,8 @@ def background_signatures(params: GenerationParams, worlds: list[MerchantWorld],
         segment = merchant_segment(world.merchant["registered_mcc"])
         route = world.merchant["acquirer_id"]
         for profile in world.faults:
+            if profile.fault not in _SHAPE:
+                continue  # service breaches such as settlement delay are not discrepancy signatures
             pattern, instrument, rule_id, share, per_occurrence = _SHAPE[profile.fault]
             weight = INSTRUMENT_MIX[instrument] / _TOTAL_WEIGHT if instrument else 1.0
             for month in _month_starts(max(profile.active_from, params.window_start), params.as_of):
@@ -65,6 +71,8 @@ def background_signatures(params: GenerationParams, worlds: list[MerchantWorld],
                     continue
                 expected = world.txn_per_day * days * weight * share
                 occurrences = max(0, int(round(rng.gauss(expected, max(1.0, expected ** 0.5)))))
+                if profile.fault in _MONTHLY:
+                    occurrences = 1
                 if occurrences == 0:
                     continue
                 impact = int(occurrences * per_occurrence * rng.uniform(0.8, 1.2) * 100)

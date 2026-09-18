@@ -33,7 +33,17 @@ def case_detail(rt: Runtime, case_id: str, sample: int = 8) -> dict[str, Any]:
         if t:
             txns.append({"txn_id": t.txn_id, "kind": str(t.kind), "instrument": str(t.instrument),
                          "amount_paise": t.amount_paise, "captured_at": t.captured_at.isoformat()})
-        for l in view.lines_by_txn.get(txn_id, []):
+        if t is None and txn_id in view.lines_by_charge:
+            device = view.devices_by_id.get(txn_id.split(":")[0])
+            if device is not None:
+                txns.append({"txn_id": txn_id, "kind": "DEVICE RENTAL", "instrument": device.device_type,
+                             "amount_paise": device.monthly_rental_paise,
+                             "captured_at": f"{txn_id.rsplit(':', 1)[1]}-01T00:00:00",
+                             "device": {"device_id": device.device_id, "activated_on": device.activated_on.isoformat(),
+                                        "rental_free_until": device.rental_free_until.isoformat(),
+                                        "returned_on": device.returned_on.isoformat() if device.returned_on else None,
+                                        "return_ref": device.return_ref}})
+        for l in view.lines_by_txn.get(txn_id, []) or view.lines_by_charge.get(txn_id, []):
             lines.append({"line_id": l.line_id, "batch_id": l.batch_id, "txn_id": l.txn_id, "type": str(l.line_type),
                           "gross_paise": l.gross_paise, "mdr_paise": l.mdr_paise, "gst_paise": l.gst_paise,
                           "tcs_paise": l.tcs_paise, "tds_paise": l.tds_paise, "net_paise": l.net_paise})
@@ -67,6 +77,25 @@ def case_detail(rt: Runtime, case_id: str, sample: int = 8) -> dict[str, Any]:
         "similar_cases": [{k: p.get(k) for k in ("case_id", "pattern", "month", "state", "outcome", "similarity")}
                           for p in case.similar_cases],
         "history": [t.__dict__ for t in case.history],
+    }
+
+
+def late_settlements(rt: Runtime, merchant_id: str | None = None) -> dict[str, Any]:
+    breaches = [b for mid, bs in rt.sla_breaches.items() if merchant_id in (None, mid) for b in bs]
+    by_month: dict[str, dict[str, int]] = {}
+    for b in breaches:
+        month = f"{b.settled_on:%Y-%m}"
+        row = by_month.setdefault(month, {"payments": 0, "held_up_paise": 0, "worst_days_late": 0})
+        row["payments"] += 1
+        row["held_up_paise"] += b.net_paise
+        row["worst_days_late"] = max(row["worst_days_late"], b.banking_days_late)
+    recent = sorted(breaches, key=lambda b: (b.settled_on, b.txn_id), reverse=True)[:25]
+    return {
+        "payments": len(breaches), "held_up_paise": sum(b.net_paise for b in breaches),
+        "average_days_late": round(sum(b.banking_days_late for b in breaches) / len(breaches), 1) if breaches else 0,
+        "by_month": dict(sorted(by_month.items())),
+        "recent": [{**b.__dict__, "captured_on": b.captured_on.isoformat(), "due_on": b.due_on.isoformat(),
+                    "deadline": b.deadline.isoformat(), "settled_on": b.settled_on.isoformat()} for b in recent],
     }
 
 

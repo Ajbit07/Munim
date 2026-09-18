@@ -20,6 +20,7 @@ class ExpectedAction(StrEnum):
     CLAIM = "CLAIM"
     DO_NOT_CLAIM = "DO_NOT_CLAIM"
     ESCALATE = "ESCALATE"
+    REPORT = "REPORT"      # a service breach to report, not money to claim
 
 
 class Fault(StrEnum):
@@ -34,6 +35,10 @@ class Fault(StrEnum):
     TAX_ON_NON_ECO = "TAX_ON_NON_ECO"                # L4, behavioural
     DUPLICATE_REFUND_DEBIT = "DUPLICATE_REFUND_DEBIT"  # L5, settlement
     DROPPED_FROM_BATCH = "DROPPED_FROM_BATCH"        # L6, settlement
+    TURNOVER_BAND_MISAPPLIED = "TURNOVER_BAND_MISAPPLIED"  # L1c, behavioural
+    RENTAL_AFTER_RETURN = "RENTAL_AFTER_RETURN"      # L7a, settlement
+    RENTAL_DURING_WAIVER = "RENTAL_DURING_WAIVER"    # L7b, settlement
+    SETTLEMENT_DELAY = "SETTLEMENT_DELAY"            # SLA breach, reported
 
 
 FAULT_SUBTYPE = {
@@ -48,6 +53,10 @@ FAULT_SUBTYPE = {
     Fault.TAX_ON_NON_ECO: ("L4_TAX_MISAPPLICATION", "L4a"),
     Fault.DUPLICATE_REFUND_DEBIT: ("L5_ORPHAN_REFUND", "L5a"),
     Fault.DROPPED_FROM_BATCH: ("L6_UNSETTLED_TRANSACTION", "L6a"),
+    Fault.TURNOVER_BAND_MISAPPLIED: ("L1_WRONG_MDR_BAND", "L1c"),
+    Fault.RENTAL_AFTER_RETURN: ("L7_DEVICE_RENTAL", "L7a"),
+    Fault.RENTAL_DURING_WAIVER: ("L7_DEVICE_RENTAL", "L7b"),
+    Fault.SETTLEMENT_DELAY: ("SETTLEMENT_DELAY", "D1"),
 }
 
 
@@ -71,7 +80,7 @@ class PlantedDiscrepancy:
     expected_action: ExpectedAction
     txn_id: str
     captured_on: date
-    component: str              # MDR | GST | TAX | REFUND_DEBIT | SETTLEMENT
+    component: str              # MDR | GST | TAX | REFUND_DEBIT | SETTLEMENT | RENTAL | DELAY
     amount_paise: int           # overcharge (CLAIM) or disputed amount (ESCALATE)
     charged_paise: int
     correct_paise: int | None   # None where the correct charge is genuinely unknown

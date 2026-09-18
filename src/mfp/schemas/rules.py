@@ -88,6 +88,7 @@ class RuleScope(BaseModel):
     acquirers: tuple[str, ...] = ()
     amount_range: AmountRange = AmountRange()
     is_ecommerce_participant: bool | None = None  # None means 'either'; gates TCS/TDS
+    turnover_range: AmountRange | None = None      # previous-year turnover band, in paise
 
 
 class Rule(BaseModel):

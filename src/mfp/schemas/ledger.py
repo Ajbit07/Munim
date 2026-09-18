@@ -27,6 +27,7 @@ class TxnKind(StrEnum):
     PAYMENT = "PAYMENT"
     REFUND = "REFUND"
     CHARGEBACK = "CHARGEBACK"
+    REVERSAL = "REVERSAL"      # a captured payment reversed by the network after capture
 
 
 class TxnStatus(StrEnum):
@@ -38,7 +39,12 @@ class LineType(StrEnum):
     PAYMENT = "PAYMENT"
     REFUND = "REFUND"
     CHARGEBACK = "CHARGEBACK"
+    REVERSAL = "REVERSAL"
+    RENTAL = "RENTAL"          # device rental debited from settlement
     CARRY_FORWARD = "CARRY_FORWARD"
+
+
+DEBIT_LINE_TYPES = frozenset({LineType.REFUND, LineType.CHARGEBACK, LineType.REVERSAL})
 
 
 class _Record(BaseModel):
@@ -55,6 +61,7 @@ class Merchant(_Record):
     onboarded_on: date
     is_ecommerce_participant: bool
     upi_class: MerchantClass
+    annual_turnover_paise: int = 0     # previous financial year; decides the RBI debit-card MDR band
 
 
 class MerchantAgreement(_Record):
@@ -109,7 +116,7 @@ class SettlementLine(_Record):
     batch_id: str
     merchant_id: str
     line_type: LineType
-    txn_id: str | None             # None only for CARRY_FORWARD
+    txn_id: str | None             # None for CARRY_FORWARD and RENTAL
     instrument: Instrument | None
     captured_at: datetime | None
     gross_paise: int               # positive for payments, negative for debits
@@ -119,6 +126,7 @@ class SettlementLine(_Record):
     tds_paise: int
     net_paise: int
     ref_batch_id: str | None = None
+    charge_ref: str | None = None  # RENTAL: "<device_id>:<YYYY-MM>"
 
     @model_validator(mode="after")
     def _net_is_consistent(self) -> SettlementLine:
@@ -146,6 +154,23 @@ class SettlementBatch(_Record):
     net_paise: int
     utr: str | None                # None when net <= 0 and the balance carries forward
     carried_forward: bool = False
+
+
+class Device(_Record):
+    """A rented acceptance device (for example a payment soundbox) and its terms.
+
+    Rental is debited from settlement once a month. It is chargeable only for
+    months that start on or after `rental_free_until` and before `returned_on`.
+    """
+
+    device_id: str
+    merchant_id: str
+    device_type: str
+    monthly_rental_paise: int
+    activated_on: date
+    rental_free_until: date
+    returned_on: date | None = None
+    return_ref: str | None = None
 
 
 class BankCredit(_Record):

@@ -97,7 +97,7 @@ def test_red_team_scores_perfectly_with_controls(tmp_path):
     summary = run_redteam(tmp_path).summary()
     assert summary["false_claims"] == 0
     assert summary["correct"] == summary["generated"]
-    assert summary["controls_claimed"] == summary["controls"] >= 5
+    assert summary["controls_claimed"] == summary["controls"] >= 7
     assert summary["correctly_escalated"] >= 2
 
 

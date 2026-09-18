@@ -28,9 +28,14 @@ def fees(rules):
     return FeeEngine(rules)
 
 
-def merchant(mcc="5411", cls="P2M", eco=False):
+LARGE = 5_00_00_000_00   # Rs 5 crore previous-year turnover
+SMALL = 12_00_000_00     # Rs 12 lakh
+
+
+def merchant(mcc="5411", cls="P2M", eco=False, turnover=LARGE):
     return Merchant(merchant_id="M", legal_name="M", registered_mcc=mcc, city="Mumbai", acquirer_id="ACQ-A",
-                    fidelity="FULL", onboarded_on=date(2024, 1, 1), is_ecommerce_participant=eco, upi_class=cls)
+                    fidelity="FULL", onboarded_on=date(2024, 1, 1), is_ecommerce_participant=eco, upi_class=cls,
+                    annual_turnover_paise=turnover)
 
 
 AGREEMENTS = [MerchantAgreement(agreement_id="A1", merchant_id="M", signed_on=date(2024, 1, 1), settlement_sla_days=1,
@@ -169,3 +174,32 @@ def test_unresolvable_mdr_rule_with_nothing_charged_still_checks_taxes(fees):
     assert decompose(fees, Instrument.RUPAY_CC_ON_UPI, 450_000, date(2026, 4, 1)) == []
     (comp,) = decompose(fees, Instrument.RUPAY_CC_ON_UPI, 450_000, date(2026, 4, 1), tcs=2_250, tds=450)
     assert comp.component == "TAX"
+
+
+# -- RBI debit card ceilings by turnover band (RBI/2017-18/105) --------------------------
+
+
+def test_debit_ceiling_governs_a_small_merchant_contract_above_it(fees):
+    expected, ref = fees.expected_mdr(Instrument.CARD_DEBIT, 100_000, date(2026, 7, 1), merchant(turnover=SMALL), AGREEMENTS)
+    assert expected[HU] == 400 and ref.rule_id == "MDR_CAP.DEBIT_CARD.SMALL_MERCHANT"
+    expected, ref = fees.expected_mdr(Instrument.CARD_DEBIT, 100_000, date(2026, 7, 1), merchant(), AGREEMENTS)
+    assert expected[HU] == 500 and ref.rule_id.startswith("AGREEMENT")
+
+
+def test_small_merchant_charged_the_large_merchant_band_is_l1(fees):
+    (comp,) = decompose(fees, Instrument.CARD_DEBIT, 300_000, date(2026, 7, 1), mdr=2_700, gst=486,
+                        m=merchant(turnover=SMALL))
+    assert comp.pattern == "mdr_above_turnover_cap" and comp.rule.rule_id == "MDR_CAP.DEBIT_CARD.SMALL_MERCHANT"
+    assert comp.amount[HU] == (2_700 + 486) - (1_200 + 216)
+
+
+def test_the_per_transaction_rupee_cap_binds_for_small_merchants(fees):
+    expected, _ = fees.expected_mdr(Instrument.CARD_DEBIT, 10_000_000, date(2026, 7, 1), merchant(turnover=SMALL), AGREEMENTS)
+    assert expected[HU] == 20_000  # Rs 200, not 0.40% of Rs 1 lakh
+
+
+def test_turnover_band_boundary_is_rs_20_lakh(rules):
+    q = lambda t: RuleQuery(frozenset({RuleType.MDR_CAP}), date(2026, 7, 1), Instrument.CARD_DEBIT, 100_000,
+                            "5411", MerchantClass.P2M, "ACQ-A", False, t)
+    assert rules.resolve(q(20_00_000_00)).rule_id == "MDR_CAP.DEBIT_CARD.SMALL_MERCHANT"
+    assert rules.resolve(q(20_00_000_01)).rule_id == "MDR_CAP.DEBIT_CARD.OTHER_MERCHANT"

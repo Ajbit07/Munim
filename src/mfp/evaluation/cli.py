@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     leaky_root = args.data / f"seed-{args.seed}"
     rt, ids, secs = run_dataset(leaky_root, merchants)
-    leaky = evaluate(leaky_root, rt.export_results(), ids, rt.data_through)
+    leaky = evaluate(leaky_root, rt.export_results(), ids, rt.data_through, rt.export_breaches())
     leaky_metrics = rt.metrics()
     print(f"leaky dataset: {len(ids)} merchants in {secs:.0f}s; false claims {leaky.false_claim_cases}")
 

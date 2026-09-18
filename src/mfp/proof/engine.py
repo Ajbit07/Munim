@@ -30,9 +30,8 @@ from mfp.core.clock import Clock
 from mfp.core.enums import Verdict
 from mfp.data.store import MerchantView
 from mfp.fees.engine import ByPolicy, FeeEngine, Unresolved
-from mfp.reconciliation.calendar import add_banking_days
-from mfp.reconciliation.engine import ReconciliationEngine
-from mfp.schemas.ledger import LineType, TxnKind, TxnStatus
+from mfp.reconciliation.engine import ReconciliationEngine, rental_month_status
+from mfp.schemas.ledger import DEBIT_LINE_TYPES, LineType, TxnKind, TxnStatus
 from mfp.schemas.proof import Candidate, ComputationStep, EvidenceRef, ProofResult
 
 ENGINE_VERSION = "1.0.0"
@@ -133,7 +132,7 @@ class ProofEngine:
     def _prove_refund(self, c: Candidate, view: MerchantView, txn_id: str) -> _TxnProof:
         tp = _TxnProof(txn_id)
         lines = sorted((l for l in view.lines_by_txn.get(txn_id, [])
-                        if l.line_type in (LineType.REFUND, LineType.CHARGEBACK)),
+                        if l.line_type in DEBIT_LINE_TYPES),
                        key=lambda l: (view.batches_by_id[l.batch_id].settlement_date if l.batch_id in view.batches_by_id else date.min, l.line_id))
         txn = view.transactions_by_id.get(txn_id)
         for line in lines:
@@ -142,7 +141,7 @@ class ProofEngine:
             self._trace_batch(view, line.batch_id, tp)
         tp.actual_charged = sum(-l.gross_paise for l in lines)
         tp.rule_ids.append("RECON.REFUND.SINGLE_DEBIT")
-        if txn is not None and txn.kind in (TxnKind.REFUND, TxnKind.CHARGEBACK):
+        if txn is not None and txn.kind in (TxnKind.REFUND, TxnKind.CHARGEBACK, TxnKind.REVERSAL):
             tp.records.append(EvidenceRef(record_type="transaction", record_id=txn_id,
                                           note=f"{txn.kind} of {txn.amount_paise} paise for {txn.parent_txn_id}"))
             owed = max(0, tp.actual_charged - txn.amount_paise)
@@ -170,7 +169,7 @@ class ProofEngine:
             tp.amount = ByPolicy.const(0)  # it did settle somewhere
             return tp
         due = self.recon.due_date(view, txn.captured_at)
-        deadline = add_banking_days(due, self.recon.grace)
+        deadline = self.recon.deadline(view, txn.captured_at)
         if deadline > as_of:
             tp.amount = ByPolicy.const(0)
             tp.notes.append(f"not yet due: contracted settlement {due}, grace until {deadline}")
@@ -205,6 +204,43 @@ class ProofEngine:
         )
         return tp
 
+    def _prove_rental(self, c: Candidate, view: MerchantView, charge_ref: str) -> _TxnProof:
+        tp = _TxnProof(charge_ref)
+        device_id, _, month_text = charge_ref.partition(":")
+        device = view.devices_by_id.get(device_id)
+        lines = view.lines_by_charge.get(charge_ref, [])
+        if device is None:
+            tp.missing.append(f"device subscription record {device_id}")
+            return tp
+        if not lines:
+            tp.missing.append(f"settlement debit for {charge_ref}")
+            return tp
+        tp.records.append(EvidenceRef(
+            record_type="device", record_id=device_id,
+            note=(f"activated {device.activated_on}, rental-free until {device.rental_free_until}, "
+                  f"returned {device.returned_on or 'not returned'}"
+                  + (f" (pickup ref {device.return_ref})" if device.return_ref else ""))))
+        for line in lines:
+            tp.records.append(EvidenceRef(record_type="settlement_line", record_id=line.line_id,
+                                          note=f"rental debit {-line.gross_paise} paise"))
+            self._trace_batch(view, line.batch_id, tp)
+        month = date.fromisoformat(f"{month_text}-01")
+        status = rental_month_status(device, month)
+        charged = sum(-l.gross_paise for l in lines)
+        tp.actual_charged = charged
+        tp.rule_ids.append("CONTRACT.DEVICE.RENTAL_TERMS")
+        if status == "CHARGEABLE":
+            owed = max(0, charged - device.monthly_rental_paise)  # only a duplicate debit would be owed
+            why = "month is chargeable under the device terms"
+        else:
+            owed = charged
+            why = ("device returned before this month began" if status == "rental_after_return"
+                   else "month falls inside the rental-free period")
+        tp.amount = ByPolicy.const(owed)
+        tp.step = ComputationStep(label=f"{charge_ref} RENTAL", expression=f"debited {charged}; {why}",
+                                  result_paise=owed, rule_id="CONTRACT.DEVICE.RENTAL_TERMS")
+        return tp
+
     # -- verdict ---------------------------------------------------------------
 
     def prove(self, candidate: Candidate, view: MerchantView, as_of: date, proof_id: str) -> ProofResult:
@@ -216,6 +252,8 @@ class ProofEngine:
                 proofs.append(self._prove_refund(candidate, view, txn_id))
             elif candidate.component == "SETTLEMENT":
                 proofs.append(self._prove_unsettled(candidate, view, txn_id, as_of))
+            elif candidate.component == "RENTAL":
+                proofs.append(self._prove_rental(candidate, view, txn_id))
             else:
                 tp = _TxnProof(txn_id)
                 tp.unresolved = f"component {candidate.component!r} has no deterministic proof"

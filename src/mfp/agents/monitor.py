@@ -103,8 +103,23 @@ class MonitorAgent:
 
     # -- case creation ----------------------------------------------------------
 
+    def report_delays(self, merchant_id: str, report: ReconciliationReport) -> None:
+        """Late settlements are service breaches: recorded and reported, never claimed."""
+        rt = self.rt
+        if not report.sla_breaches:
+            return
+        rt.sla_breaches.setdefault(merchant_id, []).extend(report.sla_breaches)
+        worst = max(report.sla_breaches, key=lambda b: b.banking_days_late)
+        rt.events.append(ACTOR, "settlement.delay.detected", merchant_id=merchant_id,
+                         payments=len(report.sla_breaches),
+                         held_up_paise=sum(b.net_paise for b in report.sla_breaches),
+                         worst_days_late=worst.banking_days_late,
+                         reason="Payments settled after the contracted timeline plus grace",
+                         action="reported to settlement operations; no claim, the agreement specifies no penalty")
+
     def open_cases(self, merchant_id: str, report: ReconciliationReport, source: str) -> list[Case]:
         rt = self.rt
+        self.report_delays(merchant_id, report)
         for issue in report.integrity_issues:
             rt.events.append(ACTOR, "integrity.issue", merchant_id=merchant_id, kind=issue.kind,
                              batch_id=issue.batch_id, detail=issue.detail)
@@ -126,6 +141,17 @@ class MonitorAgent:
                 unresolved_reason=head.unresolved_reason,
             )
             rt.cases.add(case, key + (source,))
+            rc_id = f"RC-{merchant_id}-{case.pattern}-{case.instrument or 'ANY'}"
+            if rt.prevention_status(rc_id) == "APPLIED":
+                case.regression = True
+                rt.mark_recurred(rc_id)
+                rt.events.append(ACTOR, "pattern.recurred", case_id=case.case_id, merchant_id=merchant_id,
+                                 root_cause_id=rc_id, pattern=case.pattern,
+                                 reason="A fix confirmed earlier has not held: the same discrepancy is back",
+                                 action="case prioritised; correction re-requested")
+            elif not any(c.pattern == case.pattern and c.case_id != case.case_id for c in rt.cases.all(merchant_id)):
+                rt.events.append(ACTOR, "pattern.new", case_id=case.case_id, merchant_id=merchant_id,
+                                 pattern=case.pattern, reason="First occurrence of this pattern for the merchant")
             rt.events.append(
                 ACTOR, "case.discovered", case_id=case.case_id, merchant_id=merchant_id, source=source,
                 discrepancy_type=case.discrepancy_type, pattern=case.pattern, month=case.month,

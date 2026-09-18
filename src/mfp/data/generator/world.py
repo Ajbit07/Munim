@@ -23,7 +23,13 @@ from mfp.data.generator.params import (
     ACQUIRERS,
     CARD_CREDIT_BPS,
     CARD_DEBIT_BPS,
+    CARD_DEBIT_BPS_SMALL,
     CITIES,
+    DEVICE_MONTHLY_RENTAL_PAISE,
+    DEVICE_PROBABILITY,
+    DEVICE_RENTAL_FREE_DAYS,
+    DEVICE_RETURN_PROBABILITY,
+    SMALL_MERCHANT_TURNOVER_PAISE,
     COHORT_MCCS,
     HERO_ACQUIRER,
     INSTRUMENT_MIX,
@@ -59,6 +65,7 @@ class MerchantWorld:
     agreement: dict
     snapshots: list[dict] = field(default_factory=list)
     faults: list[FaultProfile] = field(default_factory=list)
+    devices: list[dict] = field(default_factory=list)
     txn_per_day: int = 0
     amount_mu_rupees: float = 650.0
     amount_sigma: float = 1.0
@@ -136,6 +143,9 @@ def build_worlds(params: GenerationParams, tariff: ProcessorTariff) -> list[Merc
         upi_class = MerchantClass.P2PM if est_monthly_rupees <= 100_000 else MerchantClass.P2M
 
         onboarded = params.window_start - timedelta(days=rng.randint(30, 900))
+        yearly_rupees = txn_per_day * 365 * mu * math.exp(sigma**2 / 2) * rng.uniform(0.85, 1.15)
+        turnover_paise = int(yearly_rupees) * 100
+        small = turnover_paise <= SMALL_MERCHANT_TURNOVER_PAISE
         merchant = {
             "merchant_id": merchant_id,
             "legal_name": name,
@@ -146,6 +156,7 @@ def build_worlds(params: GenerationParams, tariff: ProcessorTariff) -> list[Merc
             "onboarded_on": onboarded.isoformat(),
             "is_ecommerce_participant": eco,
             "upi_class": str(upi_class),
+            "annual_turnover_paise": turnover_paise,
         }
         agreement = {
             "agreement_id": f"AGR-{merchant_id}",
@@ -153,11 +164,12 @@ def build_worlds(params: GenerationParams, tariff: ProcessorTariff) -> list[Merc
             "signed_on": onboarded.isoformat(),
             "settlement_sla_days": 1 if rng.random() < 0.85 else 2,
             "card_credit_rate_percent": str(_bps_to_percent(_round_bps(rng, *CARD_CREDIT_BPS))),
-            "card_debit_rate_percent": str(_bps_to_percent(_round_bps(rng, *CARD_DEBIT_BPS))),
+            "card_debit_rate_percent": str(_bps_to_percent(_round_bps(rng, *(CARD_DEBIT_BPS_SMALL if small else CARD_DEBIT_BPS)))),
             "netbanking_rate_percent": str(_bps_to_percent(_round_bps(rng, *NETBANKING_BPS))),
         }
         world = MerchantWorld(merchant, agreement, txn_per_day=txn_per_day,
                               amount_mu_rupees=mu, amount_sigma=sigma)
+        world.devices = build_devices(params, world, is_hero=is_hero)
         world.faults = assign_faults(params, world, tariff, is_hero=is_hero)
         worlds.append(world)
 
@@ -177,6 +189,9 @@ _COVERAGE: tuple[tuple[Fault, str], ...] = (
     (Fault.TAX_ON_NON_ECO, "Merchant flagged as e-commerce participant; TCS and 194-O TDS deducted from a plain PA flow"),
     (Fault.DUPLICATE_REFUND_DEBIT, "Refund debits re-sent in the following settlement run after a retry"),
     (Fault.DROPPED_FROM_BATCH, "Payments captured during batch-close dropped from the settlement file"),
+    (Fault.TURNOVER_BAND_MISAPPLIED, "Merchant turnover band recorded as above Rs 20 lakh; debit cards priced at the large-merchant ceiling"),
+    (Fault.RENTAL_AFTER_RETURN, "Soundbox returned with a pickup reference, but the rental mandate was never stopped"),
+    (Fault.SETTLEMENT_DELAY, "Settlement runs slipping several banking days past the contracted timeline"),
 )
 
 
@@ -202,19 +217,59 @@ def ensure_class_coverage(params: GenerationParams, worlds: list[MerchantWorld],
                 continue
             if fault is Fault.MCC_MISCONFIG and not tariff.rupay_cc_rate(m["registered_mcc"])[0].value < default_rate.value:
                 continue
+            if fault is Fault.TURNOVER_BAND_MISAPPLIED and m["annual_turnover_paise"] > SMALL_MERCHANT_TURNOVER_PAISE:
+                continue
+            if fault is Fault.RENTAL_AFTER_RETURN:
+                if not world.devices:
+                    continue
+                if not world.devices[0]["returned_on"]:
+                    returned = mid_window
+                    world.devices[0] = {**world.devices[0], "returned_on": returned.isoformat(),
+                                        "return_ref": f"RET-{world.merchant_id}-{returned:%Y%m%d}"}
             fparams = {
                 Fault.MCC_MISCONFIG: {"pricing_mcc": "5999"},
                 Fault.CONTRACT_RATE_DRIFT: {"drift_bps": 25},
                 Fault.UPI_SMALL_MDR: {"fraction": params.upi_small_mdr_fraction},
                 Fault.DUPLICATE_REFUND_DEBIT: {"probability": params.duplicate_refund_probability},
                 Fault.DROPPED_FROM_BATCH: {"probability": params.dropped_payment_probability},
+                Fault.SETTLEMENT_DELAY: {"probability": params.settlement_delay_probability},
             }.get(fault, {})
             start = RUPAY_CC_TABLE_LOADED_ON if fault is Fault.MCC_MISCONFIG else mid_window
+            if fault is Fault.RENTAL_AFTER_RETURN:
+                start = date.fromisoformat(world.devices[0]["returned_on"])
             world.faults = sorted(
                 world.faults + [FaultProfile(world.merchant_id, fault, start, cause + " (coverage rule)", fparams)],
                 key=lambda f: (f.active_from, f.fault),
             )
             break
+
+
+# -- devices ------------------------------------------------------------
+
+
+def build_devices(params: GenerationParams, world: MerchantWorld, *, is_hero: bool) -> list[dict]:
+    """Rented payment soundboxes. Every draw happens unconditionally."""
+    rng = stream(params, "device", world.merchant_id)
+    has_device, returned_draw = rng.random(), rng.random()
+    active_offset = rng.randint(0, 400)
+    return_offset = rng.randint(30, 300)
+    mid = world.merchant_id
+    if is_hero:
+        activated, returned = params.hero.device_activated_on, params.hero.device_returned_on
+    elif has_device < DEVICE_PROBABILITY:
+        activated = params.window_start - timedelta(days=active_offset)
+        returned = params.window_start + timedelta(days=return_offset) if returned_draw < DEVICE_RETURN_PROBABILITY else None
+        if returned is not None and returned > params.as_of - timedelta(days=45):
+            returned = None
+    else:
+        return []
+    return [{
+        "device_id": f"SBX-{mid}", "merchant_id": mid, "device_type": "SOUNDBOX",
+        "monthly_rental_paise": DEVICE_MONTHLY_RENTAL_PAISE, "activated_on": activated.isoformat(),
+        "rental_free_until": (activated + timedelta(days=DEVICE_RENTAL_FREE_DAYS)).isoformat(),
+        "returned_on": returned.isoformat() if returned else None,
+        "return_ref": f"RET-{mid}-{returned:%Y%m%d}" if returned else None,
+    }]
 
 
 # -- faults -------------------------------------------------------------
@@ -235,7 +290,8 @@ def assign_faults(
     start, end = params.window_start, params.as_of
 
     names = ("acq_b", "acq_c", "mcc", "drift", "small", "ppi",
-             "gst_exempt", "tax_on_tax", "tax", "dup", "drop")
+             "gst_exempt", "tax_on_tax", "tax", "dup", "drop",
+             "turnover", "rental_return", "rental_waiver", "delay")
     draws = {name: rng.random() for name in names}
     # Random faults start in the first three quarters of the window, so a fault
     # always has enough history behind it to be observable.
@@ -272,6 +328,11 @@ def assign_faults(
         add(Fault.DROPPED_FROM_BATCH, hero.dropped_from_batch_from,
             "Payments captured during batch-close dropped from the settlement file",
             probability=hero.dropped_payment_probability)
+        add(Fault.RENTAL_AFTER_RETURN, hero.device_returned_on,
+            "Soundbox returned with a pickup reference, but the rental mandate was never stopped")
+        add(Fault.SETTLEMENT_DELAY, hero.settlement_delay_from,
+            "Settlement runs slipping several banking days past the contracted T+1",
+            probability=hero.settlement_delay_probability)
     else:
         if mcc_misconfig_matters and draws["mcc"] < probs.mcc_misconfig:
             add(Fault.MCC_MISCONFIG, RUPAY_CC_TABLE_LOADED_ON,
@@ -305,6 +366,21 @@ def assign_faults(
             add(Fault.DROPPED_FROM_BATCH, dates["drop"],
                 "Payments captured during batch-close dropped from the settlement file",
                 probability=params.dropped_payment_probability)
+        small = m["annual_turnover_paise"] <= SMALL_MERCHANT_TURNOVER_PAISE
+        if small and draws["turnover"] < probs.turnover_band_misapplied:
+            add(Fault.TURNOVER_BAND_MISAPPLIED, dates["turnover"],
+                "Merchant turnover band recorded as above Rs 20 lakh; debit cards priced at the large-merchant ceiling")
+        returned = next((d for d in world.devices if d["returned_on"]), None)
+        if returned and draws["rental_return"] < probs.rental_after_return:
+            add(Fault.RENTAL_AFTER_RETURN, date.fromisoformat(returned["returned_on"]),
+                "Soundbox returned with a pickup reference, but the rental mandate was never stopped")
+        if world.devices and draws["rental_waiver"] < probs.rental_during_waiver:
+            add(Fault.RENTAL_DURING_WAIVER, date.fromisoformat(world.devices[0]["activated_on"]),
+                "Rental debited during the promised rental-free period")
+        if draws["delay"] < probs.settlement_delay:
+            add(Fault.SETTLEMENT_DELAY, dates["delay"],
+                "Settlement runs slipping several banking days past the contracted timeline",
+                probability=params.settlement_delay_probability)
 
     if m["acquirer_id"] == "ACQ-B" and (is_hero or draws["acq_b"] < probs.acq_b_upi_mdr_early):
         add(Fault.UPI_MDR_EARLY, ACQ_B_UPI_MDR_EARLY_FROM,
@@ -389,6 +465,7 @@ def build_ledger(params: GenerationParams, world: MerchantWorld) -> list[dict]:
             refund_draw, refund_days, partial_draw, partial_frac = (
                 rng.random(), rng.randint(0, 10), rng.random(), rng.uniform(0.2, 0.8))
             cbk_draw, cbk_days = rng.random(), rng.randint(20, 45)
+            rev_draw, rev_days = rng.random(), rng.randint(1, 3)
 
             txn_id = f"TXN-{mid}-{n_pay:07d}"
             payments.append({
@@ -408,6 +485,16 @@ def build_ledger(params: GenerationParams, world: MerchantWorld) -> list[dict]:
                         "txn_id": f"RFD-{mid}-{n_ref:06d}", "merchant_id": mid, "kind": "REFUND",
                         "status": "SUCCESS", "instrument": str(instrument),
                         "amount_paise": refund_amt, "captured_at": refund_at.isoformat(),
+                        "parent_txn_id": txn_id, "order_ref": f"ORD-{n_pay:08d}",
+                    })
+            elif instrument in CARD_LIKE and rev_draw < params.reversal_probability:
+                rev_at = captured + timedelta(days=rev_days, hours=1)
+                if rev_at.date() <= params.as_of:
+                    n_cbk += 1
+                    followups.append({
+                        "txn_id": f"REV-{mid}-{n_cbk:06d}", "merchant_id": mid, "kind": "REVERSAL",
+                        "status": "SUCCESS", "instrument": str(instrument),
+                        "amount_paise": amount, "captured_at": rev_at.isoformat(),
                         "parent_txn_id": txn_id, "order_ref": f"ORD-{n_pay:08d}",
                     })
             elif instrument in CARD_LIKE and cbk_draw < params.chargeback_probability:

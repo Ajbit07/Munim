@@ -63,6 +63,9 @@ class EvaluationReport:
     false_claim_cases: int = 0
     false_claim_components: int = 0
     false_claim_paise: int = 0
+    delays_planted: int = 0
+    delays_reported: int = 0
+    human_filed_claims: int = 0
     lookalikes_total: int = 0
     lookalikes_claimed: int = 0
     exact_amount_cases: int = 0
@@ -85,7 +88,7 @@ def load_truth(dataset_root: Path) -> dict[str, Any]:
 
 
 def evaluate(dataset_root: Path | str, results: list[dict[str, Any]], merchants: list[str],
-             data_through: date) -> EvaluationReport:
+             data_through: date, breaches: list[dict[str, Any]] | None = None) -> EvaluationReport:
     root = Path(dataset_root)
     truth = load_truth(root)
     index = MerchantIndex(ObservedDataset(root))
@@ -98,13 +101,23 @@ def evaluate(dataset_root: Path | str, results: list[dict[str, Any]], merchants:
         for txn_id in case["txn_ids"]:
             owner[(txn_id, component)] = case
 
-    plants = [p for p in truth["plants"] if p["merchant_id"] in merchants]
+    reported = {b["txn_id"] for b in breaches or []}
+    all_plants = [p for p in truth["plants"] if p["merchant_id"] in merchants]
+    delay_plants = [p for p in all_plants if p["expected_action"] == "REPORT"]
+    report.delays_planted = len(delay_plants)
+    report.delays_reported = sum(1 for p in delay_plants if p["txn_id"] in reported)
+    for p in delay_plants:
+        if p["txn_id"] not in reported:
+            report.misses.append(Miss(p["plant_id"], p["merchant_id"], p["discrepancy_type"], p["subtype"],
+                                      p["amount_paise"], "REPORTING", "late settlement not reported"))
+    plants = [p for p in all_plants if p["expected_action"] != "REPORT"]
     claim_keys = {(p["txn_id"], p["component"]) for p in plants if p["expected_action"] == "CLAIM"}
     plant_amounts: dict[tuple[str, str], int] = {(p["txn_id"], p["component"]): p["amount_paise"] for p in plants}
     by_type: dict[str, Counter] = defaultdict(Counter)
 
     def settled_lines(view, txn_id):
-        return [l for l in view.lines_by_txn.get(txn_id, []) if view.batches_by_id[l.batch_id].settlement_date <= data_through]
+        lines = view.lines_by_txn.get(txn_id, []) or view.lines_by_charge.get(txn_id, [])
+        return [l for l in lines if view.batches_by_id[l.batch_id].settlement_date <= data_through]
 
     for p in plants:
         view = views[p["merchant_id"]]
@@ -115,6 +128,7 @@ def evaluate(dataset_root: Path | str, results: list[dict[str, Any]], merchants:
         t["planted"] += 1
         lines = settled_lines(view, p["txn_id"])
         observable = (p["component"] == "SETTLEMENT"
+                      or (p["component"] == "RENTAL" and len(lines) >= 1)
                       or (p["component"] == "REFUND_DEBIT" and len(lines) >= 2)
                       or (p["component"] in ("MDR", "GST", "TAX") and len(lines) == 1))
         if not observable:
@@ -164,7 +178,7 @@ def evaluate(dataset_root: Path | str, results: list[dict[str, Any]], merchants:
 
     resembles_component = {"L1_WRONG_MDR_BAND": "MDR", "L2_NIL_MDR_VIOLATION": "MDR", "L3_GST_BASE_ERROR": "GST",
                            "L4_TAX_MISAPPLICATION": "TAX", "L5_ORPHAN_REFUND": "REFUND_DEBIT",
-                           "L6_UNSETTLED_TRANSACTION": "SETTLEMENT"}
+                           "L6_UNSETTLED_TRANSACTION": "SETTLEMENT", "L7_DEVICE_RENTAL": "RENTAL"}
     lookalike_keys = {(l["txn_id"], resembles_component[l["resembles"]])
                       for l in truth["lookalikes"] if l["merchant_id"] in merchants}
     report.lookalikes_total = len(lookalike_keys)
@@ -176,6 +190,9 @@ def evaluate(dataset_root: Path | str, results: list[dict[str, Any]], merchants:
         report.recovered_paise += case["recovered_paise"]
         if not case["filed"]:
             continue
+        if case.get("human_filed"):
+            report.human_filed_claims += 1
+            continue  # a person's decision, scored separately from the agent's
         keys = [(t, case["component"]) for t in case["txn_ids"]]
         bad = [k for k in keys if k not in claim_keys]
         if bad:
@@ -208,6 +225,7 @@ def render_markdown(report: EvaluationReport, title: str) -> str:
         f"| Recovered | {r.recovered:,} |",
         f"| Escalate-only charges correctly escalated | {r.correctly_escalated:,} of {r.expected_escalations:,} |",
         f"| **False claims (cases)** | **{r.false_claim_cases}** |",
+        f"| Late settlements reported (not claimed) | {r.delays_reported} of {r.delays_planted} |",
         f"| Lookalikes present / claimed | {r.lookalikes_total:,} / {r.lookalikes_claimed} |",
         f"| Filed cases whose proven amount equals planted amount exactly | {r.exact_amount_cases} of {r.amount_checked_cases} |",
         f"| Planted minus proven across filed cases | {rs(r.amount_delta_paise)} |", "",

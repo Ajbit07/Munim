@@ -35,12 +35,19 @@
       "Saturday",
       "Sunday"
     ],
-    "notes": "Banking-day arithmetic excludes weekends. A national holiday list is loaded per generated dataset year; absent an entry the day counts as a banking day.",
-    "confidence": "LOW",
+    "national_holidays": [
+      "2025-10-02",
+      "2026-01-26",
+      "2026-08-15",
+      "2026-10-02",
+      "2027-01-26"
+    ],
+    "notes": "Banking days exclude weekends and the three fixed-date national holidays (Republic Day, Independence Day, Gandhi Jayanti). RBI publishes state-wise bank holiday lists under the Negotiable Instruments Act; those vary by state and are not modelled.",
+    "confidence": "MEDIUM",
     "verification_status": "ASSUMED",
     "assumptions": [
-      "Real settlement calendars vary by sponsor bank and by RTGS/NEFT availability.",
-      "We model weekends only, plus an explicit per-dataset holiday list. A case whose classification flips depending on a single holiday assumption must escalate."
+      "Only the three fixed-date national holidays are observed; state and moveable holidays are not.",
+      "A case whose classification flips on a single holiday assumption must escalate; the two-banking-day grace absorbs a single missed holiday."
     ]
   },
   "reconciliation_invariants": [
@@ -57,6 +64,22 @@
       "statement": "A successful captured payment settles in exactly one batch within its contracted settlement timeline plus grace.",
       "discrepancy_type": "L6_UNSETTLED_TRANSACTION",
       "basis": "RBI (Regulation of Payment Aggregators) Directions, 2025 require settlement per the disclosed PA-merchant agreement; the agreement's settlement_sla_days governs the due date.",
+      "confidence": "HIGH",
+      "verification_status": "SECONDARY"
+    },
+    {
+      "rule_id": "CONTRACT.DEVICE.RENTAL_TERMS",
+      "statement": "Device rental is debited only for months that start on or after the rental-free period ends and before the device is returned.",
+      "discrepancy_type": "L7_DEVICE_RENTAL",
+      "basis": "The device subscription record (activation, rental-free period, return with reference) is the contract. A debit outside it has no basis.",
+      "confidence": "HIGH",
+      "verification_status": "PRIMARY"
+    },
+    {
+      "rule_id": "SLA.AGREEMENT.ON_TIME",
+      "statement": "A payment settles on or before its contracted settlement date plus grace.",
+      "discrepancy_type": "SETTLEMENT_DELAY",
+      "basis": "RBI (Regulation of Payment Aggregators) Directions, 2025 require settlement per the disclosed agreement. A breach is reported and escalated to settlement operations; it is not a money claim, because no penalty for late settlement is specified in the agreement.",
       "confidence": "HIGH",
       "verification_status": "SECONDARY"
     }

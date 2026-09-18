@@ -29,20 +29,25 @@ ALLOWED: dict[CaseState, frozenset[CaseState]] = {
     S.NO_DISCREPANCY: frozenset({S.CLOSED}),
     S.PROVEN: frozenset({S.ACTION_PENDING, S.BATCHED}),
     S.BATCHED: frozenset({S.ACTION_PENDING}),
-    S.ACTION_PENDING: frozenset({S.FILED}),
+    S.ACTION_PENDING: frozenset({S.FILED, S.WITHDRAWN}),
     S.FILED: frozenset({S.WAITING}),
-    S.WAITING: frozenset({S.FOLLOW_UP, S.RECOVERED, S.PARTIALLY_RECOVERED, S.REJECTED}),
-    S.FOLLOW_UP: frozenset({S.WAITING, S.ESCALATED}),
+    S.WAITING: frozenset({S.FOLLOW_UP, S.RECOVERED, S.PARTIALLY_RECOVERED, S.REJECTED, S.WITHDRAWN}),
+    S.FOLLOW_UP: frozenset({S.WAITING, S.ESCALATED, S.WITHDRAWN}),
     S.REJECTED: frozenset({S.REPRESENT, S.CLOSED_UNRECOVERED, S.ESCALATED}),
     S.REPRESENT: frozenset({S.FILED, S.FOLLOW_UP}),
     S.PARTIALLY_RECOVERED: frozenset({S.CLOSED}),
-    S.ESCALATED: frozenset({S.INVESTIGATING, S.CLOSED}),
+    S.ESCALATED: frozenset({S.INVESTIGATING, S.CLOSED, S.ACTION_PENDING}),
+    S.WITHDRAWN: frozenset(),
     S.RECOVERED: frozenset(),
     S.CLOSED_UNRECOVERED: frozenset(),
     S.CLOSED: frozenset(),
 }
 
 TERMINAL = frozenset(s for s, nxt in ALLOWED.items() if not nxt)
+
+# Only a person may move a case out of the human queue. The agents cannot
+# overrule the proof gate; a reviewer can, and the log says so.
+HUMAN_ONLY = frozenset({(S.ESCALATED, S.ACTION_PENDING), (S.ESCALATED, S.CLOSED)})
 IN_FLIGHT = frozenset({S.FILED, S.WAITING, S.FOLLOW_UP, S.REJECTED, S.REPRESENT})
 
 
@@ -91,11 +96,22 @@ class Case:
     next_check_at: datetime | None = None
     follow_ups: int = 0
     hold_reason: str | None = None
+    human_attestation: dict[str, Any] | None = None
+    regression: bool = False
     history: list[Transition] = field(default_factory=list)
 
     @property
     def proven_paise(self) -> int:
         return self.proof.discrepancy_paise if self.proof and self.proof.authorises_claim else 0
+
+    @property
+    def claimed_paise(self) -> int:
+        """Proven by the engine, or attested by a person for a human-filed claim."""
+        if self.proven_paise:
+            return self.proven_paise
+        if self.human_attestation and self.proof is not None:
+            return self.proof.discrepancy_paise
+        return 0
 
     @property
     def captured_range(self) -> str:
@@ -112,6 +128,7 @@ class Case:
             "recovered_paise": self.recovered_paise, "verdict": str(self.proof.verdict) if self.proof else None,
             "claim_id": self.claim_id, "root_cause_id": self.root_cause_id, "follow_ups": self.follow_ups,
             "hold_reason": self.hold_reason, "escalation": self.escalation,
+            "human_attestation": self.human_attestation, "regression": self.regression,
         }
 
 
@@ -125,6 +142,8 @@ class CaseStateMachine:
                    **payload: Any) -> Case:
         if to not in ALLOWED[case.state]:
             raise IllegalTransition(f"{case.case_id}: {case.state} -> {to} is not permitted")
+        if (case.state, to) in HUMAN_ONLY and actor is not Actor.HUMAN:
+            raise IllegalTransition(f"{case.case_id}: {case.state} -> {to} requires a human reviewer")
         record = Transition(self.clock.now().isoformat(), str(actor), str(case.state), str(to), reason,
                             action, tool, list(evidence or []), result)
         self.events.append(

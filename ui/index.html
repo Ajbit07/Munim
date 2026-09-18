@@ -33,6 +33,8 @@
     </div>
   </header>
 
+  <div class="offline" id="offline" role="alert" hidden>Can't reach the Settlement Teammate server. Check that <code>python serve.py</code> is running; retrying every 3 seconds.</div>
+
   <section class="hero" aria-live="polite">
     <div class="hero-inner">
       <div class="merchant-card">
@@ -49,7 +51,7 @@
       </div>
 
       <div class="hero-money">
-        <div class="hero-eyebrow">Found for you, without being asked</div>
+        <div class="hero-eyebrow">Paytm checked every settlement and fixed its own errors, without being asked</div>
         <div class="hero-found" id="hero-found">₹0</div>
         <div class="hero-back"><span id="hero-back">₹0</span> back in your account</div>
         <div class="hero-bar" role="progressbar" aria-label="Share of found money recovered" aria-valuemin="0" aria-valuemax="100" id="hero-bar-wrap"><span id="hero-bar"></span></div>
@@ -80,7 +82,7 @@
     </div>
     <div class="tile">
       <span class="tile-icon amber"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-      <span class="tile-label">Recovery in progress</span><span class="tile-value" id="m-progress">₹0</span>
+      <span class="tile-label">Recovery in progress</span><span class="tile-value" id="m-progress">₹0</span><span class="tile-note" id="m-progress-note"></span>
     </div>
     <div class="tile">
       <span class="tile-icon blue"><svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 9h6M9 13h6M9 17h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
@@ -88,11 +90,11 @@
     </div>
     <div class="tile">
       <span class="tile-icon amber"><svg viewBox="0 0 24 24"><path d="M4 12h12M12 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="tile-label">Claims in progress</span><span class="tile-value" id="m-active">0</span>
+      <span class="tile-label">Corrections in progress</span><span class="tile-value" id="m-active">0</span><span class="tile-note" id="m-active-note"></span>
     </div>
     <div class="tile">
       <span class="tile-icon violet"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 20c.8-3.6 3.5-5.5 7-5.5s6.2 1.9 7 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
-      <span class="tile-label">Needs your review</span><span class="tile-value" id="m-escalated">0</span>
+      <span class="tile-label">Needs your review</span><span class="tile-value" id="m-escalated">0</span><span class="tile-note" id="m-escalated-note"></span>
     </div>
     <div class="tile tile-shield">
       <span class="tile-icon green"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.6-3 8.3-7 9.5-4-1.2-7-4.9-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2.2 2.2L15.5 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -116,6 +118,7 @@
         <button role="tab" aria-selected="true" data-tab="cases">Cases</button>
         <button role="tab" aria-selected="false" data-tab="queue">Needs review</button>
         <button role="tab" aria-selected="false" data-tab="causes">Root causes</button>
+        <button role="tab" aria-selected="false" data-tab="delays">Late settlements</button>
         <button role="tab" aria-selected="false" data-tab="network">Network</button>
         <button role="tab" aria-selected="false" data-tab="redteam">Red team</button>
         <button role="tab" aria-selected="false" data-tab="baseline">Baseline</button>
@@ -124,6 +127,7 @@
       <div class="tab-body" id="tab-cases"></div>
       <div class="tab-body" id="tab-queue" hidden></div>
       <div class="tab-body" id="tab-causes" hidden></div>
+      <div class="tab-body" id="tab-delays" hidden></div>
       <div class="tab-body" id="tab-network" hidden></div>
       <div class="tab-body" id="tab-redteam" hidden></div>
       <div class="tab-body" id="tab-baseline" hidden></div>
