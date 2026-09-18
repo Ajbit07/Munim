@@ -69,7 +69,7 @@ paise; across all filed cases the difference is ₹0.01.
 | Device rental terms (₹199/month, 90 free days) are a synthetic contract, not a published Paytm tariff | Rental proofs cite the device record and contract terms | DATA.md |
 | TCS/TDS base is gross; 194-O ₹5 lakh floor not modelled | Affects e-commerce participants only | DATA.md |
 | Settlement ops is simulated (deterministic policy) | Recovery rates reflect that policy | workflow/claims.py |
-| Claude, Cognee, Sarvam adapters not exercised against live services (no credentials) | Deterministic fallbacks are what ran | README.md |
+| Cognee and Sarvam adapters not exercised against live services (no credentials) | Deterministic fallbacks are what ran | README.md |
 | n8n verified live in Docker (every lifecycle step, 0 fallbacks); evaluation numbers use the in-process workflow for speed | Identical decisions either way; the workflow only executes steps | README.md |
 | Signature-only merchants' signatures are simulated from fault profiles | Network patterns combine simulated and real agent emissions | DATA.md |
 

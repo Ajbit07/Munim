@@ -174,7 +174,7 @@ def test_the_demo_rehearses_with_no_network(loop_datasets, monkeypatch):
         return real_connect(self, address)
 
     monkeypatch.setattr(socket.socket, "connect", guarded)
-    for var in ("ANTHROPIC_API_KEY", "SARVAM_API_KEY", "N8N_WEBHOOK_URL", "MFP_WORKFLOW"):
+    for var in ("SARVAM_API_KEY", "N8N_WEBHOOK_URL", "MFP_WORKFLOW"):
         monkeypatch.delenv(var, raising=False)
     results = DemoDirector(data_dir=loop_datasets[0].parent, seed=5).run_all()
     assert len(results) == 12

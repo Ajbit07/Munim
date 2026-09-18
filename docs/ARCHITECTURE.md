@@ -86,8 +86,7 @@ received", never "missing".
 
 | Seam | Default | Optional | On failure |
 |---|---|---|---|
-| Reasoner | `DeterministicReasoner` | `ClaudeReasoner` via `LLMGateway` (`claude-opus-5`, structured JSON output, server-side refusal fallback) | Deterministic answer, noted on the event |
-| LLM gateway | `off` | `live`, `record`, `replay` (content-addressed cache in `fixtures/llm_cache/`) | Replay miss raises, so it is found in rehearsal |
+| Reasoner | `DeterministicReasoner` | none: templated interpretation, fully offline | — |
 | Workflow | `LocalWorkflowEngine` | `N8nWorkflowEngine` → `workflow/n8n/claim_lifecycle.json` | Step runs locally; `workflow.fallback` event |
 | Memory | `LocalMemoryStore` (SQLite) | `CogneeMemoryStore` (narratives to Cognee; counterparty statistics stay local) | Local store; error recorded |
 | Notifier | `TemplatedNotifier` (Hinglish) | `SarvamNotifier` (translate, optional speech) | Template; source marked |

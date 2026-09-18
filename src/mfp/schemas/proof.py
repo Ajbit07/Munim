@@ -4,7 +4,7 @@ ProofResult is the only thing that may authorise a claim. It is frozen, it
 carries the hash of the inputs it was computed from, and it can only be built
 by the Proof Engine.
 
-The LLM may propose a Candidate. It may never construct a ProofResult.
+A reasoner may propose a Candidate. It may never construct a ProofResult.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class Candidate(BaseModel):
     transaction_ids: tuple[str, ...]
     settlement_batch_id: str | None = None
     as_of: date
-    rationale: str  # may be LLM-authored; explanatory only
+    rationale: str  # reasoner-authored; explanatory only
     evidence: tuple[EvidenceRef, ...] = ()
     suggested_rule_ids: tuple[str, ...] = ()
     # What the detection claims to have found, so the Proof Engine can re-derive

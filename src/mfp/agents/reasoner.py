@@ -4,17 +4,16 @@ The Investigation Agent asks a Reasoner to explain what a group of findings
 most likely means and what to check. The Follow-up Agent asks it to read a
 counterparty's free-text reply. Neither answer reaches the Proof Engine.
 
-  DeterministicReasoner  templated, instant, always available
-  ClaudeReasoner         Claude through LLMGateway, falling back to the
-                         deterministic reasoner on any failure
+  DeterministicReasoner  templated, instant, always available, offline
+
+The Reasoner protocol is the seam: any other implementation plugs in here,
+and the proof gate makes its answer irrelevant to what is owed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-
-from mfp.llm.gateway import LLMGateway, LLMUnavailable, ReplayMiss
 
 _HYPOTHESES = {
     "mdr_above_mcc_rate": "The processor is pricing RuPay credit on UPI with a merchant category other than the registered one.",
@@ -90,66 +89,3 @@ class DeterministicReasoner:
             if needle in lowered:
                 return code
         return None
-
-
-_EXPLAIN_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "rationale": {"type": "string"},
-        "hypothesis": {"type": "string"},
-        "checks": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["rationale", "hypothesis", "checks"],
-    "additionalProperties": False,
-}
-
-_INTERPRET_SCHEMA = {
-    "type": "object",
-    "properties": {"reason_code": {"type": "string", "enum": [c for _, c in _REJECTION_KEYWORDS] + ["UNKNOWN"]}},
-    "required": ["reason_code"],
-    "additionalProperties": False,
-}
-
-_SYSTEM = (
-    "You are the investigation analyst inside an autonomous settlement-protection system for Indian "
-    "payment-aggregator merchants. You explain what a group of reconciliation findings most likely means "
-    "and what evidence would confirm it. You do not decide whether money is owed or how much: a separate "
-    "deterministic proof engine does that from published rules, and your output never reaches it. "
-    "Be specific to the facts given. Do not invent rates, rules or records that are not in the input."
-)
-
-
-class ClaudeReasoner:
-    def __init__(self, gateway: LLMGateway, fallback: DeterministicReasoner | None = None) -> None:
-        self.gateway = gateway
-        self.fallback = fallback or DeterministicReasoner()
-        self.name = f"claude:{gateway.model}:{gateway.mode}"
-        self.fallbacks = 0
-
-    def explain(self, context: dict[str, Any]) -> Reasoning:
-        base = self.fallback.explain(context)
-        facts = {k: v for k, v in context.items() if k != "similar_cases"}
-        facts["precedent"] = [{k: p.get(k) for k in ("case_id", "pattern", "month", "state", "outcome")}
-                              for p in context.get("similar_cases") or []]
-        try:
-            answer = self.gateway.complete_json(system=_SYSTEM, user=f"Findings:\n{facts}", schema=_EXPLAIN_SCHEMA,
-                                                purpose=f"explain {context.get('case_id')}")
-        except (LLMUnavailable, ReplayMiss, ValueError) as exc:
-            self.fallbacks += 1
-            base.notes.append(f"model unavailable ({exc}); deterministic reasoning used")
-            return base
-        if answer is None:
-            return base
-        return Reasoning(answer["rationale"], answer["hypothesis"], list(answer["checks"]), self.name)
-
-    def interpret_response(self, message: str) -> str | None:
-        try:
-            answer = self.gateway.complete_json(
-                system=_SYSTEM, user=f"Classify this claims-desk reply: {message}",
-                schema=_INTERPRET_SCHEMA, purpose="interpret response")
-        except (LLMUnavailable, ReplayMiss, ValueError):
-            self.fallbacks += 1
-            return self.fallback.interpret_response(message)
-        if answer is None or answer["reason_code"] == "UNKNOWN":
-            return self.fallback.interpret_response(message)
-        return answer["reason_code"]

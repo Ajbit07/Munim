@@ -61,7 +61,7 @@ class DemoDirector:
             Step("investigation", "The Investigation Agent works a case",
                  "Records, rules, rate-card history and precedent are gathered before anything is concluded.", self._investigate),
             Step("proof", "The Proof Engine decides",
-                 "Deterministic recomputation from published rules. The language model has no vote.", self._proof),
+                 "Deterministic recomputation from published rules. The reasoner has no vote.", self._proof),
             Step("claim", "The Follow-up Agent files the correction",
                  "Only because the proof authorised it. The correction goes to Paytm settlement ops through the workflow.", self._claim),
             Step("follow_up", "Time passes; the agent keeps working",

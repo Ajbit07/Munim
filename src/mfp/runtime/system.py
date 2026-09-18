@@ -10,7 +10,6 @@ agents and their adapters, and drives the loop:
 
 Adapters are chosen by environment, each with a local fallback:
     MFP_WORKFLOW = local | n8n        MFP_MEMORY  = local | cognee
-    MFP_LLM_MODE = off | live | record | replay
     SARVAM_API_KEY set -> Sarvam notifier, else templated
 """
 
@@ -26,14 +25,13 @@ from typing import Any
 from mfp.agents.followup import FollowUpAgent
 from mfp.agents.investigation import InvestigationAgent
 from mfp.agents.monitor import MonitorAgent
-from mfp.agents.reasoner import ClaudeReasoner, DeterministicReasoner, Reasoner
+from mfp.agents.reasoner import DeterministicReasoner, Reasoner
 from mfp.cases.state_machine import IN_FLIGHT, Case, CaseRepository, CaseStateMachine
 from mfp.core.clock import VirtualClock
 from mfp.core.enums import Actor, CaseState, Instrument, MerchantClass
 from mfp.core.events import EventLog
 from mfp.data.store import MerchantIndex, MerchantView, ObservedDataset
 from mfp.fees.engine import FeeEngine
-from mfp.llm.gateway import LLMGateway
 from mfp.memory.store import LocalMemoryStore, MemoryStore
 from mfp.network.engine import NetworkPatternEngine, SignatureEmitter
 from mfp.notify.notifier import MerchantMessage, Notifier, SarvamNotifier, TemplatedNotifier
@@ -98,10 +96,7 @@ class Runtime:
                 memory = LocalMemoryStore()
         self.memory = memory
 
-        if reasoner is None:
-            gateway = LLMGateway()
-            reasoner = ClaudeReasoner(gateway) if gateway.enabled else DeterministicReasoner()
-        self.reasoner = reasoner
+        self.reasoner = reasoner or DeterministicReasoner()
         self.notifier = notifier or (SarvamNotifier() if os.environ.get("SARVAM_API_KEY") else TemplatedNotifier())
 
         network_cfg = load_raw("network.json", config_dir)

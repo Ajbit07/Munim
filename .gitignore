@@ -3,6 +3,5 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 data/generated/
-fixtures/llm_cache/
 .env
 reports/*.json

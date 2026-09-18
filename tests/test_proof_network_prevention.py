@@ -8,13 +8,12 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from mfp.agents.reasoner import ClaudeReasoner
+from mfp.agents.reasoner import DeterministicReasoner
 from mfp.core.clock import VirtualClock
 from mfp.core.enums import CaseState, Verdict
 from mfp.data.store import MerchantIndex, MerchantView, ObservedDataset
 from mfp.evaluation.redteam import run_redteam
 from mfp.fees.engine import FeeEngine
-from mfp.llm.gateway import LLMGateway, ReplayMiss
 from mfp.network.engine import NetworkPatternEngine
 from mfp.notify.notifier import TemplatedNotifier, rupees
 from mfp.proof.engine import ProofEngine
@@ -169,23 +168,6 @@ def test_merchant_message_is_short_and_in_hinglish():
     assert "koi discrepancy nahi" in clean.text
 
 
-def test_llm_gateway_off_makes_no_calls_and_replay_miss_is_loud(tmp_path):
-    assert LLMGateway(mode="off").complete_json(system="s", user="u", schema={}, purpose="t") is None
-    with pytest.raises(ReplayMiss):
-        LLMGateway(mode="replay", cache_dir=tmp_path).complete_json(system="s", user="u", schema={}, purpose="t")
-
-
-def test_llm_gateway_replays_a_recorded_answer(tmp_path):
-    gateway = LLMGateway(mode="replay", cache_dir=tmp_path)
-    key = gateway._key("s", "u", {})
-    (tmp_path / f"{key}.json").write_text(json.dumps({"answer": {"reason_code": "UNKNOWN"}}), encoding="utf-8")
-    assert gateway.complete_json(system="s", user="u", schema={}, purpose="t") == {"reason_code": "UNKNOWN"}
-
-
-def test_claude_reasoner_degrades_to_deterministic_when_the_model_is_unavailable(tmp_path):
-    reasoner = ClaudeReasoner(LLMGateway(mode="replay", cache_dir=tmp_path))
-    context = {"case_id": "C", "pattern": "mdr_above_agreement", "month": "2026-09", "component": "MDR",
-               "transactions": 3, "instrument": "CARD_CREDIT", "rule_id": "AGREEMENT", "detected_paise": 1200}
-    reasoning = reasoner.explain(context)
-    assert reasoning.source == "deterministic" and reasoning.notes
+def test_deterministic_reasoner_reads_a_rate_card_rejection():
+    reasoner = DeterministicReasoner()
     assert reasoner.interpret_response("Charges have been applied as per the rate card.") == "RATE_AS_PER_RATE_CARD"

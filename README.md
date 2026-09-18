@@ -82,7 +82,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (171, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (169, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -100,7 +100,6 @@ Each has a local fallback, and the demo never depends on it.
 
 | Integration | Enable | Fallback |
 |---|---|---|
-| Claude (investigation reasoning, reply interpretation) | `pip install -e ".[llm]"`, set `ANTHROPIC_API_KEY`, `MFP_LLM_MODE=record` once, then `replay` on stage | Deterministic reasoner |
 | n8n (claim lifecycle execution) | see below | In-process workflow; fallback is logged |
 | Cognee (case memory graph) | `pip install -e ".[memory]"`, configure Cognee's LLM, `MFP_MEMORY=cognee` | Local SQLite memory |
 | Sarvam (Hinglish/Hindi message and speech) | set `SARVAM_API_KEY` | Templated Hinglish |
@@ -108,7 +107,7 @@ Each has a local fallback, and the demo never depends on it.
 **Verified live in this build:** n8n 2.39 in Docker executed every claim
 lifecycle step of a full run (submit, check, follow-up, re-present, withdraw)
 with zero fallbacks. **Written but not run against live services** (no
-credentials were available): the Claude, Cognee and Sarvam adapters. The demo
+credentials were available): the Cognee and Sarvam adapters. The demo
 and evaluation use their deterministic fallbacks, and a test proves the whole
 demo runs with every non-localhost connection blocked.
 
@@ -146,7 +145,7 @@ network in your firewall. `docker compose down` stops n8n.
 ```
  MONITOR AGENT ─────▶ INVESTIGATION AGENT ─────▶ ║ PROOF GATE ║ ─────▶ FOLLOW-UP AGENT
  discovers work        gathers evidence,          ║ deterministic ║     files, chases,
- (12-month backfill,   asks the reasoner what     ║ no LLM        ║     represents, recovers,
+ (12-month backfill,   asks the reasoner what     ║ rules only    ║     represents, recovers,
   new batches)         it means, builds a         ╚═══════╤═══════╝     fixes the cause
                        candidate with no amount     PROVEN │ UNPROVEN
                                                            ▼      ▼
@@ -191,7 +190,6 @@ src/mfp/memory/    SQLite and Cognee memory
 src/mfp/network/   signature emitter, pattern engine (k-anonymity)
 src/mfp/prevention/ root cause, future leakage
 src/mfp/notify/    templated and Sarvam merchant messages
-src/mfp/llm/       Claude gateway with record/replay
 src/mfp/runtime/   the wired system and read models
 src/mfp/data/      observed-data store; generator (processor simulation, ground truth)
 src/mfp/redteam/   adversarial scenario generator
@@ -200,5 +198,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             171 tests incl. firewall canaries and an offline rehearsal
+tests/             169 tests incl. firewall canaries and an offline rehearsal
 ```

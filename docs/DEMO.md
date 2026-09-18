@@ -20,10 +20,6 @@ Open http://localhost:8000. Nothing needs the network: `tests/test_new_capabilit
 runs all twelve steps with every non-localhost connection blocked. Rehearse once with Wi-Fi off anyway.
 If the server stops mid-demo, the page shows a banner and reconnects on its own.
 
-If Claude is available, record answers once with `MFP_LLM_MODE=record`, then
-present with `MFP_LLM_MODE=replay`. Otherwise the deterministic reasoner is used
-and the feed says so.
-
 Backup: `python demo.py` tells the same story in a terminal in about 12 seconds.
 
 ## The story
@@ -35,7 +31,7 @@ Press **Run next step** for each beat (or **Play the story** to auto-advance).
 | 1 | Big **0**: complaints raised by the merchant. Virtual date 10 Sep 2026. | "Shree Ganesh Supermart hasn't reported anything. No ticket, no question. Paytm checks anyway." |
 | 2 | Feed: Monitor finds 256 settlement batches with no audit on record. | "Nobody prompted this. Paytm checks every settlement it sends, as it happens." |
 | 3 | Audit: 12 months, 47,915 transactions, 46,889 lines, 256 bank credits matched by UTR. 33 cases, 28 proven, 5 escalated. Headline **₹24,383 found**. Feed also reports late settlements. | "It reconciles every batch back to the bank credit before waiting for anything new. Late money is reported, not claimed: the agreement sets a timeline, not a penalty." |
-| 4 | Drawer opens on the showcase case: 101 UPI payments, August 2026. Detection text, rule, rate-card history, precedent. | "The Investigation Agent can use a language model to explain. It cannot set an amount." |
+| 4 | Drawer opens on the showcase case: 101 UPI payments, August 2026. Detection text, rule, rate-card history, precedent. | "The Investigation Agent explains what it sees. It cannot set an amount." |
 | 5 | Scroll to **Proof**: Expected ₹0.00 · Actual −₹1,744.78 · Verified difference ₹1,744.78. The "Verified" seal lands. | "The 0.4% UPI MDR was switched on on 20 August. It takes effect on 15 October. Recomputed per transaction, from the published rule, under every rounding convention." |
 | 6 | Correction: reference DSP-…, evidence attached, sent to Paytm settlement ops through the workflow. | "Filed because the proof authorised it, and only because of that." |
 | 7 | Virtual clock moves to 16 Sep. Feed: 3 new batches, 6 follow-ups, a rejection "as per rate card", 2 re-presentations with the signed agreement, recoveries. | "It keeps working after the first action. It chases, it answers rejections, it waits." |
@@ -59,8 +55,8 @@ Optional beats if time allows:
   Fee Engine are separate implementations; a static firewall forbids either
   importing the other, with canary tests. Across 389 filed cases the
   proven amount differs from the planted amount by ₹0.01 in total.
-- **"What if the LLM hallucinates?"** Open any case: the proof has no input from
-  the model. A test runs a reasoner that insists everything is owed; the results
+- **"What if the reasoning is wrong?"** Open any case: the proof has no input from
+  the reasoner. A test runs a reasoner that insists everything is owed; the results
   are identical.
 - **"Why not claim the wallet charges?"** No source establishes whether a
   merchant contract passes PPI interchange through. The rule is marked ASSUMED,

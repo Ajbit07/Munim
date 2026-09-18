@@ -6,7 +6,7 @@
 
 | Component | May | May not |
 |---|---|---|
-| Reasoner (deterministic or Claude) | Explain findings, propose a hypothesis and checks, interpret a claims-desk reply | Produce an amount, a verdict, a Candidate field that carries money |
+| Reasoner (deterministic) | Explain findings, propose a hypothesis and checks, interpret a claims-desk reply | Produce an amount, a verdict, a Candidate field that carries money |
 | Investigation Agent | Build a `Candidate`: transaction ids, component, pattern, rationale | Construct a `ProofResult` |
 | Proof Engine | Produce a `ProofResult` | Read the Reconciliation Engine's numbers, read the generator, read ground truth |
 | Follow-up Agent | File a claim when `ProofResult.authorises_claim` is true for the case's own candidate | File anything else |
