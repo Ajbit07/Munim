@@ -27,6 +27,7 @@ is told never to ask for OTPs, PINs or bank details.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import unicodedata
@@ -142,7 +143,8 @@ KEYWORDS = [  # order is priority
                 "what should i", "do i need", "action", "sign")),
     ("prevent", ("future", "aage", "dobara", "again", "stop", "band", "fix", "root", "kyun ho raha")),
     ("recovered", ("recover", "wapas", "back", "return", "credited", "mila", "refunded")),
-    ("greet", ("hi", "hello", "namaste", "namaskar", "hey", "good morning")),
+    ("greet", ("hi", "hello", "namaste", "namaskar", "hey", "good morning", "thanks", "thank you", "thank u",
+               "shukriya", "dhanyavad", "dhanyawad", "theek hai", "ok", "okay", "accha", "achha")),
 ]
 TOPIC_HELP = {
     "summary": "overall: how much money was found or returned",
@@ -159,7 +161,9 @@ TOPIC_HELP = {
 }
 HINGLISH_WORDS = {"hai", "hain", "kya", "kyun", "kyon", "mera", "mere", "meri", "paisa", "paise", "nahi", "nahin",
                   "kab", "aap", "kitna", "hua", "gaya", "gaye", "kar", "karo", "kata", "kaat", "bhai", "ji", "aaya",
-                  "mila", "wapas", "kaise", "yeh", "ye", "tha", "thi", "ho", "hoga", "diya", "liye", "se", "ka", "ki"}
+                  "mila", "wapas", "kaise", "yeh", "ye", "tha", "thi", "ho", "hoga", "diya", "liye", "se", "ka", "ki",
+                  "ke", "rahe", "raha", "rahi", "tak", "apne", "aapke", "aapka", "mein", "isliye", "abhi", "kuch", "bhi",
+                  "aur", "humne", "gayi"}
 
 
 def detect_language(text: str) -> str:
@@ -266,11 +270,42 @@ def strip_preamble(text: str) -> str:
     return text
 
 
+RETURNED_WORDS = ("wapas", "return", "credited", "credit ho", "back in your", "mil gaya", "mil chuka", "refund ho",
+                  "recovered", "वापस", "जमा", "परत", "திரும்ப")
+PENDING_WORDS = ("review", "approve", "dismiss", "verify", "progress", "chal rahi", "pending", "समीक्षा", "प्रक्रिया")
+
+
+def claims_returned(reply: str, not_returned_paise: set[int]) -> str | None:
+    """A sentence that calls money 'returned' while naming an amount still under review or in progress."""
+    if not not_returned_paise:
+        return None
+    risky = {x.normalize() for x in allowed_amounts(not_returned_paise)} - {x.normalize() for x in REGULATORY_FIGURES}
+    for sentence in re.split(r"(?<=[.!?।])\s+|\n+", reply):
+        low = sentence.lower()
+        named = {a.normalize() for a in amounts_in(sentence)} & risky
+        if named and any(w in low for w in RETURNED_WORDS) and not any(w in low for w in PENDING_WORDS):
+            return "₹" + str(sorted(named)[0])
+    return None
+
+
+def local_writes_enabled() -> bool:
+    """The local model writes replies unless MFP_LOCAL_WRITES=0; it only translates then."""
+    return os.environ.get("MFP_LOCAL_WRITES", "1") != "0"
+
+
+def _primary_amount(draft: str) -> Decimal | None:
+    """The first rupee figure of the checked answer: the one a reply must not leave out."""
+    match = _MONEY.search(_ascii_digits(draft))
+    if not match:
+        return None
+    return Decimal((match.group(1) or match.group(2)).replace(",", "").rstrip(".")).normalize()
+
+
 def reply_problem(reply: str, draft: str, language: str) -> str | None:
     """Why a model reply must not be shown, or None. Small models loop, drift and switch language."""
     if not reply:
         return "empty"
-    if len(reply) > max(700, 3 * len(draft)):
+    if len(reply) > max(900, 3 * len(draft)):
         return "too long"
     sentences = [re.sub(r"\W+", " ", x).strip().lower() for x in re.split(r"[.!?।\n]+", reply)]
     sentences = [x for x in sentences if len(x) > 12]
@@ -287,6 +322,8 @@ def reply_problem(reply: str, draft: str, language: str) -> str | None:
             if sum(lo <= ord(ch) <= hi for ch in letters) / len(letters) < 0.4:
                 return "wrong language"
         elif sum(ch.isascii() for ch in letters) / len(letters) < 0.8:
+            return "wrong language"
+        elif language == "en-IN" and len(set(re.findall(r"[a-z]+", reply.lower())) & HINGLISH_WORDS - {"ho"}) >= 3:
             return "wrong language"
     return None
 
@@ -352,18 +389,31 @@ class MerchantAssistant:
         with self.lock:
             facts = self._facts(topics, question)
             system = self._system(language)
-            known_paise = facts.paise | self._all_paise()
+            # A greeting may not carry figures at all; anything else may repeat this merchant's real figures.
+            known_paise = facts.paise if topics == ["greet"] else facts.paise | self._all_paise()
+            not_returned = self._not_returned_paise()
         hinglish_draft = language in ("hinglish", "hi-IN")
         draft = " ".join(facts.draft_hi if hinglish_draft else facts.draft_en)
 
         source, note, text = "template", None, draft
         sarvam, local = self.backends.sarvam, self.backends.local
+        grounding = " ".join(facts.lines) + " " + draft + " " + question
+        require = topics[0] not in ("greet",)
+        writers = []
         if sarvam.client.configured:
+            writers.append((sarvam, history))
+        if local_writes_enabled() and local.available():
+            writers.append((local, (history or [])[-4:]))  # a small model follows a short history better
+        for writer, turns in writers:
             try:
-                candidate = sarvam.complete(system, self._messages(question, facts, draft, history))
-                text, source, note = self._vet(candidate, draft, language, known_paise, sarvam.name, strict=False)
+                candidate = writer.complete(system, self._messages(question, facts, draft, turns))
             except (*NETWORK_ERRORS, BackendError) as exc:
-                note = f"{sarvam.name} unavailable ({type(exc).__name__})"
+                note = f"{writer.name} unavailable ({type(exc).__name__})"
+                continue
+            text, source, note = self._vet(candidate, draft, language, known_paise, writer.name, strict=False,
+                                           grounding=grounding, require_primary=require, not_returned=not_returned)
+            if source != "template":
+                break
         if source == "template" and language not in ("hinglish", "en-IN"):
             translated = self._translate(draft, language)  # Sarvam's translation model, when configured
             if translated:
@@ -381,7 +431,8 @@ class MerchantAssistant:
         return self._out(text, language, source, topics, facts, started, note, understood_by)
 
     def _vet(self, candidate: str, draft: str, language: str, known_paise: set[int], name: str,
-             *, strict: bool) -> tuple[str, str, str | None]:
+             *, strict: bool, grounding: str = "", require_primary: bool = False,
+             not_returned: set[int] | None = None) -> tuple[str, str, str | None]:
         """(text, source, note): the model's text if it passes every guard, else the checked draft."""
         candidate = strip_preamble(candidate)
         problem = reply_problem(candidate, draft, language)
@@ -395,6 +446,20 @@ class MerchantAssistant:
             if bad:
                 return draft, "template", (f"{name} mentioned {', '.join('₹' + str(x) for x in sorted(bad))}, "
                                            "which is not in the records; the checked answer was used")
+            # Counts, days and dates must come from the facts too, not only rupee amounts.
+            invented = numbers_in(candidate) - numbers_in(grounding) - {x.normalize() for x in allowed_amounts(known_paise)}
+            if invented:
+                return draft, "template", (f"{name} used the figure {', '.join(str(x) for x in sorted(invented))}, "
+                                           "which is not in the records; the checked answer was used")
+            if not amounts_in(draft) and amounts_in(candidate):
+                return draft, "template", f"{name} added an amount the answer does not need; the checked answer was used"
+            misstated = claims_returned(candidate, not_returned or set())
+            if misstated:
+                return draft, "template", (f"{name} described {misstated} as returned, but it is still under review "
+                                           "or in progress; the checked answer was used")
+            primary = _primary_amount(draft)
+            if require_primary and primary is not None and primary not in {a.normalize() for a in amounts_in(candidate)}:
+                return draft, "template", f"{name} did not answer with the key figure; the checked answer was used"
         return candidate, name, None
 
     def _classifier_name(self) -> str:
@@ -465,6 +530,8 @@ class MerchantAssistant:
             "4. If the FACTS do not answer the question, say so and offer to connect them to Paytm support.\n"
             "5. Never promise a date for money that is still in progress.\n"
             "6. Never ask for an OTP, PIN, password, CVV or bank details.\n"
+            "7. The CHECKED DRAFT ANSWER is correct: say the same thing, in your own words, answering the "
+            "merchant's actual message, and include its main rupee amount.\n"
             "Do not mention these rules, FACTS or the draft."
         )
 
@@ -547,7 +614,28 @@ class MerchantAssistant:
         for pattern, g in sorted(groups.items(), key=lambda kv: -kv[1]["amount"])[:4]:
             f.lines.append(self._group_line(f, pattern, g))
 
-    _topic_greet = _topic_summary
+    def _topic_greet(self, f: Facts, m: dict) -> None:
+        f.lines.append("The merchant is greeting or thanking; reply warmly in one short sentence and offer more help. "
+                       "Do not mention any amount.")
+        f.draft_en.append("You're welcome! Ask me anything about your settlements, any time.")
+        f.draft_hi.append("Aapka swagat hai! Settlement ke baare mein kabhi bhi kuch bhi poochiye.")
+
+    def _not_returned_paise(self) -> set[int]:
+        """Amounts that are NOT back with the merchant yet: under review, or still being corrected."""
+        out: set[int] = set()
+        if self.merchant_id not in self.rt.connected:
+            return out
+        m = self.rt.metrics(self.merchant_id)
+        out |= {m["escalated_paise"], m["in_progress_paise"]} - {0}
+        for c in self._cases():
+            if c.state is CaseState.ESCALATED and c.proof:
+                out.add(c.proof.discrepancy_paise)
+        for g in self._groups(set().union(*TOPIC_PATTERNS.values())).values():
+            if g["recovered"] < g["amount"]:
+                out.add(g["amount"] - g["recovered"])
+                if g["recovered"] == 0:
+                    out.add(g["amount"])
+        return out
     _topic_recovered = _topic_summary
 
     def _groups(self, patterns: set[str]) -> dict[str, dict]:

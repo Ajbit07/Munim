@@ -82,7 +82,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (183, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (187, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -123,14 +123,24 @@ language; the assistant answers from that merchant's own proven records.
 | Job | With `SARVAM_API_KEY` | Without it (offline) |
 |---|---|---|
 | Understand the question | keywords, then Sarvam | keywords, then the local model (Devanagari, Tamil, unusual phrasing) |
-| Write the answer | Sarvam writes it conversationally from the facts, in the merchant's language | the checked answer, instantly, in Hinglish or English |
+| Write the answer | Sarvam writes it conversationally from the facts, in the merchant's language | the local model writes it the same way (about 6–11 s); `MFP_LOCAL_WRITES=0` shows the checked answer instantly instead |
 | Other languages | Sarvam | the local model translates the checked answer |
 | Voice (Listen) | Sarvam text-to-speech | the browser's own voice |
 
-No model decides anything. Facts and the checked answer are computed from the
-runtime; guards reject any reply that uses an amount not in the merchant's
-records, a translation that changes a figure, a reply that loops, or one in the
-wrong language, and the checked answer is shown instead. Requests for an OTP,
+No model decides anything. Facts and a checked answer are computed from the
+runtime, and the model writes the reply from them. Guards reject a reply that:
+
+- uses an amount, count or date not in this merchant's records;
+- calls money "returned" while it is still under review or in progress;
+- leaves out the answer's key figure, or adds amounts to an answer that needs none
+  (a "thanks" gets a greeting, never figures);
+- loops, rambles, or is in a different language from the question (an English
+  question gets an English answer);
+- as a translation, changes any figure.
+
+A rejected reply is replaced by the checked answer, and the bubble says why. In a
+live run on the demo data, gemma3:4b wrote 7 of 9 replies; the guards replaced one
+invented total, one Hinglish answer to an English question, and one mislabelled amount. Requests for an OTP,
 PIN or password are refused before any model is asked.
 
 ```bash
@@ -225,5 +235,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             183 tests incl. firewall canaries and an offline rehearsal
+tests/             187 tests incl. firewall canaries and an offline rehearsal
 ```

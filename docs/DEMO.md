@@ -45,10 +45,12 @@ Optional beats if time allows:
 
 - **Merchant chat ↗** (after step 8): a separate phone-style window. Ask
   "Soundbox rental kyun kata?" and it answers instantly from the device record
-  and the rental case. Ask "मेरा साउंडबॉक्स का किराया क्यों कटा?" and the local
-  model understands the Hindi and replies in Hindi with the same figures (about
-  10–25 seconds on the laptop GPU). Ask it for an OTP and it refuses. Every
-  bubble says which engine wrote it and that the figures were checked.
+  and the rental case, written by the local model (about 6–11 seconds). Ask
+  "मेरा साउंडबॉक्स का किराया क्यों कटा?" and it replies in Hindi with the return
+  date and the same figures. Ask it for an OTP and it refuses instantly. Every
+  bubble says which engine wrote it and that the figures were checked; if a
+  guard replaced the model's reply, the bubble says why. For a faster, fully
+  scripted run: `MFP_LOCAL_WRITES=0 python serve.py`.
 
 - **Needs review tab**: press **File on my authority** on a PPI case. The state
   machine only lets a person release an escalated case; the correction carries

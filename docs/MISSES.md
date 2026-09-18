@@ -70,7 +70,7 @@ paise; across all filed cases the difference is ₹0.01.
 | TCS/TDS base is gross; 194-O ₹5 lakh floor not modelled | Affects e-commerce participants only | DATA.md |
 | Settlement ops is simulated (deterministic policy) | Recovery rates reflect that policy | workflow/claims.py |
 | Cognee and Sarvam adapters not exercised against live services (no credentials) | Deterministic fallbacks are what ran | README.md |
-| Chat on the local model is slow (about 10–25 s for a non-Hinglish reply on a 4 GB GPU) and a 4B model sometimes changes a figure while translating | The guard then shows the checked answer in Hinglish/English instead | assistant/chat.py |
+| Chat on the local model takes about 6–11 s a reply on a 4 GB GPU, and a 4B model can misstate things | Guards catch wrong figures, invented numbers, review money called returned, and wrong language; a misstatement that uses only correct figures and none of those words can still get through | assistant/chat.py |
 | Chat topic routing is keyword-first; a model is asked only when no keyword matches | A message mixing topics answers the first one | assistant/chat.py |
 | n8n verified live in Docker (every lifecycle step, 0 fallbacks); evaluation numbers use the in-process workflow for speed | Identical decisions either way; the workflow only executes steps | README.md |
 | Signature-only merchants' signatures are simulated from fault profiles | Network patterns combine simulated and real agent emissions | DATA.md |

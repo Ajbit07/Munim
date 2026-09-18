@@ -76,6 +76,7 @@ def test_questions_route_to_the_right_records():
     assert _topics("GST zyada kyun laga") == ["tax"]
     assert _topics("what is the current status") == ["summary"]  # "current" is not "rent"
     assert _topics("hello") == ["greet"]
+    assert _topics("thanks bhai") == ["greet"]
 
 
 def test_language_is_read_from_the_script_the_merchant_types_in():
@@ -99,7 +100,7 @@ def test_quality_guard_rejects_loops_wrong_language_and_rambling():
     draft = "₹995.00 wapas aa chuka hai."
     assert reply_problem("aapko lagta hai ki " * 20, draft, "hinglish") == "repeats itself"
     assert reply_problem("₹995.00 wapas aa chuka hai.", draft, "hi-IN") == "wrong language"
-    assert reply_problem("x" * 900, draft, "hinglish") == "too long"
+    assert reply_problem("x" * 1000, draft, "hinglish") == "too long"
     assert reply_problem("₹995.00 वापस आ चुका है।", draft, "hi-IN") is None
     assert strip_preamble("ज़रूर, मैं इसे हिंदी में लिखता हूँ:\n₹995.00 वापस आ चुका है।") == "₹995.00 वापस आ चुका है।"
 
@@ -143,10 +144,44 @@ def test_a_local_translation_must_keep_every_figure(rt):
     assert bad["source"] == "template" and "changed a figure" in bad["note"]
 
 
-def test_hinglish_and_english_answers_do_not_wait_for_the_local_model(rt):
-    local = FakeLocal("should not be used")
-    r = MerchantAssistant(rt, HERO, chain(local=local)).reply("Settlement late kyun aaya?", "hinglish")
+def test_the_local_model_writes_replies_unless_switched_off(rt, monkeypatch):
+    m = rt.metrics(HERO)
+    reply = f"Aapka {inr(m['recovered_paise'])} wapas aa gaya hai, bhai."
+    local = FakeLocal(reply)
+    r = MerchantAssistant(rt, HERO, chain(local=local)).reply("Kitna paisa wapas aaya?", "hinglish")
+    assert r["source"] == "local:fake" and r["reply"] == reply
+    monkeypatch.setenv("MFP_LOCAL_WRITES", "0")
+    local = FakeLocal(reply)
+    r = MerchantAssistant(rt, HERO, chain(local=local)).reply("Kitna paisa wapas aaya?", "hinglish")
     assert r["source"] == "template" and local.calls == []
+
+
+def test_money_under_review_can_never_be_called_returned(rt):
+    waiting = [c for c in rt.cases.all(HERO) if str(c.state) == "ESCALATED" and c.proof]
+    assert waiting
+    amount = inr(sum(c.proof.discrepancy_paise for c in waiting))  # the total the answer is built on
+    wrong = FakeLocal(f"Koi baat nahi! {amount} aapke account mein wapas aa gaya hai.")
+    right = FakeLocal(f"{amount} aapke review ke liye rakha gaya hai, approve ya dismiss karein.")
+    bad = MerchantAssistant(rt, HERO, chain(local=wrong)).reply("Kya mujhe kuch karna hai?", "hinglish")
+    good = MerchantAssistant(rt, HERO, chain(local=right)).reply("Kya mujhe kuch karna hai?", "hinglish")
+    assert bad["source"] == "template" and "under review" in bad["note"]
+    assert good["source"] == "local:fake"
+
+
+def test_invented_counts_and_needless_amounts_are_rejected(rt):
+    m = rt.metrics(HERO)
+    invented = FakeLocal(f"{inr(m['recovered_paise'])} 24 ghante mein wapas aa gaya.")
+    r = MerchantAssistant(rt, HERO, chain(local=invented)).reply("Kitna paisa wapas aaya?", "hinglish")
+    assert r["source"] == "template" and "24" in r["note"]
+    greeting = FakeLocal(f"Shukriya! Aapke {inr(m['recovered_paise'])} wapas aa gaye.")
+    r = MerchantAssistant(rt, HERO, chain(local=greeting)).reply("thanks bhai", "hinglish")
+    assert r["source"] == "template" and "₹" not in r["reply"]
+
+
+def test_an_english_question_gets_an_english_reply(rt):
+    local = FakeLocal("Aapke payments late aaye hain, abhi sab aa gaya hai aur kuch bhi missing nahi.")
+    r = MerchantAssistant(rt, HERO, chain(local=local)).reply("Why are my settlements late?", "auto")
+    assert r["language"] == "en-IN" and r["source"] == "template" and "wrong language" in r["note"]
 
 
 def test_the_local_model_understands_what_keywords_miss(rt):

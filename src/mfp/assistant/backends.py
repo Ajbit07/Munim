@@ -121,7 +121,7 @@ class OllamaChat:
                  max_tokens: int = 220) -> str:
         body = {
             "model": self.model, "stream": False, "keep_alive": "30m",
-            "options": {"temperature": 0, "seed": 7, "num_predict": max_tokens, "num_ctx": 2048,
+            "options": {"temperature": 0.2, "seed": 7, "num_predict": max_tokens, "num_ctx": 4096,
                         "repeat_penalty": 1.1},
             "messages": [{"role": "system", "content": system}, *messages],
         }
