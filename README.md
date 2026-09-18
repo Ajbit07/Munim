@@ -82,7 +82,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (169, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (183, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -102,14 +102,40 @@ Each has a local fallback, and the demo never depends on it.
 |---|---|---|
 | n8n (claim lifecycle execution) | see below | In-process workflow; fallback is logged |
 | Cognee (case memory graph) | `pip install -e ".[memory]"`, configure Cognee's LLM, `MFP_MEMORY=cognee` | Local SQLite memory |
-| Sarvam (Hinglish/Hindi message and speech) | set `SARVAM_API_KEY` | Templated Hinglish |
+| Sarvam (merchant chat, 12 Indian languages, translation, voice; merchant notification) | set `SARVAM_API_KEY` | Local model below, then the checked answer |
+| Local model via Ollama (offline backup for the chat) | install Ollama, `ollama pull gemma3:4b` | Checked answer (keyword understanding, Hinglish/English only) |
 
 **Verified live in this build:** n8n 2.39 in Docker executed every claim
 lifecycle step of a full run (submit, check, follow-up, re-present, withdraw)
 with zero fallbacks. **Written but not run against live services** (no
-credentials were available): the Cognee and Sarvam adapters. The demo
+credentials were available): the Cognee and Sarvam adapters; Sarvam's request
+format is checked against docs.sarvam.ai by tests. The local model (gemma3:4b
+on Ollama) was run live for the merchant chat. The demo
 and evaluation use their deterministic fallbacks, and a test proves the whole
 demo runs with every non-localhost connection blocked.
+
+### Merchant chat
+
+Press **Merchant chat ↗** in the command center (or open http://localhost:8000/chat)
+for a separate window styled as the Paytm Business app. The merchant types in any
+language; the assistant answers from that merchant's own proven records.
+
+| Job | With `SARVAM_API_KEY` | Without it (offline) |
+|---|---|---|
+| Understand the question | keywords, then Sarvam | keywords, then the local model (Devanagari, Tamil, unusual phrasing) |
+| Write the answer | Sarvam writes it conversationally from the facts, in the merchant's language | the checked answer, instantly, in Hinglish or English |
+| Other languages | Sarvam | the local model translates the checked answer |
+| Voice (Listen) | Sarvam text-to-speech | the browser's own voice |
+
+No model decides anything. Facts and the checked answer are computed from the
+runtime; guards reject any reply that uses an amount not in the merchant's
+records, a translation that changes a figure, a reply that loops, or one in the
+wrong language, and the checked answer is shown instead. Requests for an OTP,
+PIN or password are refused before any model is asked.
+
+```bash
+ollama pull gemma3:4b
+```
 
 #### Running with n8n
 
@@ -190,6 +216,7 @@ src/mfp/memory/    SQLite and Cognee memory
 src/mfp/network/   signature emitter, pattern engine (k-anonymity)
 src/mfp/prevention/ root cause, future leakage
 src/mfp/notify/    templated and Sarvam merchant messages
+src/mfp/assistant/ merchant chat: facts, guards, Sarvam and local-model backends
 src/mfp/runtime/   the wired system and read models
 src/mfp/data/      observed-data store; generator (processor simulation, ground truth)
 src/mfp/redteam/   adversarial scenario generator
@@ -198,5 +225,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             169 tests incl. firewall canaries and an offline rehearsal
+tests/             183 tests incl. firewall canaries and an offline rehearsal
 ```

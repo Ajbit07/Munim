@@ -500,6 +500,10 @@ $("btn-next").addEventListener("click", async () => {
   if (tabFor) selectTab(tabFor);
 });
 $("btn-advance").addEventListener("click", () => act("/api/clock/advance?days=1"));
+$("btn-chat").addEventListener("click", () => {
+  window.open("/chat", "merchant-chat", "width=440,height=880");
+});
+
 $("btn-reset").addEventListener("click", async () => {
   autoplay = false;
   $("btn-auto").setAttribute("aria-pressed", "false");

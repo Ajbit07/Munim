@@ -66,6 +66,11 @@ def index() -> FileResponse:
     return FileResponse(UI / "index.html")
 
 
+@app.get("/chat")
+def chat_page() -> FileResponse:
+    return FileResponse(UI / "chat.html")
+
+
 app.mount("/ui", StaticFiles(directory=UI), name="ui")
 
 
@@ -186,3 +191,57 @@ def workflow_step(body: dict[str, Any]) -> dict[str, Any]:
 @app.get("/api/workflow/receipts")
 def workflow_receipts() -> dict[str, Any]:
     return {"count": len(_n8n_receipts), "recent": list(_n8n_receipts)[-20:]}
+
+
+# -- merchant chat (Sarvam, else the local model, else the checked template) ---------------------
+
+_assistants: dict[int, Any] = {}
+
+
+def assistant():
+    from mfp.assistant.chat import MerchantAssistant
+
+    d = director()
+    key = id(d.rt)
+    if key not in _assistants:
+        _assistants.clear()
+        _assistants[key] = MerchantAssistant(d.rt, d.merchant_id, lock=_lock)
+    return _assistants[key]
+
+
+@app.on_event("startup")
+def _warm_local_model() -> None:
+    # Load the local model in the background so the first merchant question is not a minute-long wait.
+    from mfp.assistant.backends import OllamaChat
+
+    threading.Thread(target=OllamaChat().warm, daemon=True).start()
+
+
+@app.get("/api/chat/status")
+def chat_status() -> dict[str, Any]:
+    a = assistant()
+    with _lock:
+        return a.status()
+
+
+@app.post("/api/chat")
+def chat(body: dict[str, Any]) -> dict[str, Any]:
+    message = str(body.get("message", ""))
+    if not message.strip():
+        raise HTTPException(400, "message is empty")
+    history = body.get("history") if isinstance(body.get("history"), list) else []
+    result = assistant().reply(message, str(body.get("language", "auto")), history)
+    with _lock:
+        director().rt.events.append(Actor.SYSTEM, "merchant.chat", merchant_id=director().merchant_id,
+                                    topics=result["topics"], source=result["source"], guarded=bool(result["note"]))
+    return result
+
+
+@app.post("/api/chat/speak")
+def chat_speak(body: dict[str, Any]):
+    from fastapi.responses import Response
+
+    audio = assistant().speak(str(body.get("text", ""))[:1500], str(body.get("language", "hinglish")))
+    if audio is None:
+        return Response(status_code=204)  # no Sarvam key: the page uses the browser's own voice
+    return Response(content=audio, media_type="audio/wav")

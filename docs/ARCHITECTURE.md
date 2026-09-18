@@ -90,6 +90,7 @@ received", never "missing".
 | Workflow | `LocalWorkflowEngine` | `N8nWorkflowEngine` → `workflow/n8n/claim_lifecycle.json` | Step runs locally; `workflow.fallback` event |
 | Memory | `LocalMemoryStore` (SQLite) | `CogneeMemoryStore` (narratives to Cognee; counterparty statistics stay local) | Local store; error recorded |
 | Notifier | `TemplatedNotifier` (Hinglish) | `SarvamNotifier` (translate, optional speech) | Template; source marked |
+| Merchant chat (`assistant/`) | checked answer from runtime facts | `SarvamChat` (chat, translate, speech); `OllamaChat` (gemma3:4b: classify, translate) | Checked answer; the rejected reply's reason is shown |
 
 The case state machine stays authoritative in Python with every adapter.
 

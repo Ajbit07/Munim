@@ -8,9 +8,9 @@ and whether anything needs them.
   SarvamNotifier     Sarvam AI translation into Hindi (code-mixed) and
                      optional speech; falls back to the template on any failure
 
-Sarvam endpoints and fields follow Sarvam's public REST API
-(api.sarvam.ai: /translate, /text-to-speech, header api-subscription-key).
-They are NOT verified against a live key in this build; see docs/ARCHITECTURE.md.
+Sarvam endpoints and fields follow docs.sarvam.ai (checked Sep 2026:
+/translate, /text-to-speech with text + language_code, header
+api-subscription-key). NOT exercised against a live key in this build.
 """
 
 from __future__ import annotations
@@ -116,7 +116,8 @@ class SarvamNotifier:
             text = translated.get("translated_text") or base.text
             audio_path = None
             if self.audio_dir is not None:
-                speech = self._post("/text-to-speech", {"inputs": [text], "target_language_code": "hi-IN"})
+                speech = self._post("/text-to-speech", {"text": text, "language_code": "hi-IN",
+                                                        "model": "bulbul:v2", "speaker": "anushka"})
                 audios = speech.get("audios") or []
                 if audios:
                     self.audio_dir.mkdir(parents=True, exist_ok=True)
