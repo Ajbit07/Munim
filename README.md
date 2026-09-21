@@ -68,7 +68,11 @@ python generate.py --seed 42 --no-leakage
 python serve.py
 ```
 
-Then open http://localhost:8000 and press **Run next step**, or **Play the story**.
+Then open http://localhost:8000. It opens in live operation: pick any of the 25
+merchants, press **Connect merchant**, then **Run live** and the agents work on
+their own. **Generate a fresh dataset** makes a new random seed in about 35
+seconds, so a judge can see nothing is pre-built. A scripted **Guided tour** is
+one click away for presenting.
 
 Before going on stage, one command checks everything the demo needs, warms the
 local model, runs the whole story once and asks the chat three questions:
@@ -89,7 +93,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (191, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (192, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -251,5 +255,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             191 tests incl. firewall canaries and an offline rehearsal
+tests/             192 tests incl. firewall canaries and an offline rehearsal
 ```

@@ -56,7 +56,9 @@ def _state_payload(d: DemoDirector) -> dict[str, Any]:
                      "notifier": rt.notifier.name},
         "steps": d.outline(),
         "last_step": d.results[-1] if d.results else None,
-        "redteam": d.redteam, "baseline": d.baseline,
+        "redteam": d.redteam, "baseline": d.baseline, "notification": d.notification,
+        "dataset": {"seed": d.seed, "data_through": rt.data_through.isoformat(),
+                    "merchants": len(rt.index.merchant_ids("FULL")), "connected": len(rt.connected)},
         "events": len(rt.events),
     }
 
@@ -101,8 +103,122 @@ def demo_next() -> dict[str, Any]:
 @app.post("/api/demo/reset")
 def demo_reset() -> dict[str, Any]:
     with _lock:
-        _state.pop("d", None)
-        return _state_payload(director())
+        seed = _state["d"].seed if "d" in _state else 42
+        _state["d"] = DemoDirector(seed=seed)
+        _assistants.clear()
+        return _state_payload(_state["d"])
+
+
+# -- live operation ------------------------------------------------------------------------------
+
+
+@app.get("/api/merchants")
+def merchants() -> list[dict[str, Any]]:
+    with _lock:
+        return director().merchants()
+
+
+@app.post("/api/live/select")
+def live_select(body: dict[str, Any]) -> dict[str, Any]:
+    with _lock:
+        d = director()
+        try:
+            d.select(str(body.get("merchant_id", "")))
+        except KeyError:
+            raise HTTPException(404, "No such merchant in this dataset") from None
+        _assistants.clear()
+        return _state_payload(d)
+
+
+@app.post("/api/redteam/run")
+def redteam_run() -> dict[str, Any]:
+    with _lock:
+        d = director()
+        d.run_redteam()
+        return _state_payload(d)
+
+
+@app.post("/api/baseline/run")
+def baseline_run() -> dict[str, Any]:
+    with _lock:
+        d = director()
+        if not (d.data_dir / f"seed-{d.seed}-baseline" / "manifest.json").exists():
+            raise HTTPException(409, "This dataset has no clean baseline")
+        d.run_baseline()
+        return _state_payload(d)
+
+
+@app.post("/api/notify")
+def notify() -> dict[str, Any]:
+    with _lock:
+        d = director()
+        if d.merchant_id not in d.rt.connected:
+            raise HTTPException(409, "Connect the merchant first")
+        d.compose_notification()
+        return _state_payload(d)
+
+
+# -- fresh datasets: generated on request, so nothing on screen can be pre-built ------------------
+
+_generation: dict[str, Any] = {"state": "idle"}
+
+
+def _available_seeds() -> list[int]:
+    root = REPO / "data" / "generated"
+    seeds = []
+    for p in root.glob("seed-*"):
+        tail = p.name[len("seed-"):]
+        if tail.isdigit() and (p / "manifest.json").exists() and (root / f"{p.name}-baseline" / "manifest.json").exists():
+            seeds.append(int(tail))
+    return sorted(seeds)
+
+
+def _generate(seed: int) -> None:
+    import subprocess
+    import sys
+    import time
+
+    started = time.monotonic()
+    try:
+        for extra in ([], ["--no-leakage"]):
+            done = subprocess.run([sys.executable, str(REPO / "generate.py"), "--seed", str(seed), *extra],
+                                  capture_output=True, text=True, cwd=REPO)
+            if done.returncode != 0:
+                raise RuntimeError(done.stderr.strip()[-300:] or "generator failed")
+        _generation.update(state="ready", seconds=round(time.monotonic() - started))
+    except Exception as exc:  # reported to the page, never raised into the server
+        _generation.update(state="failed", error=str(exc))
+
+
+@app.get("/api/datasets")
+def datasets() -> dict[str, Any]:
+    with _lock:
+        current = director().seed
+    return {"current": current, "available": _available_seeds(), "generation": dict(_generation)}
+
+
+@app.post("/api/datasets/new")
+def datasets_new() -> dict[str, Any]:
+    import os
+
+    if _generation.get("state") == "generating":
+        raise HTTPException(409, "A dataset is already being generated")
+    seed = 1000 + int.from_bytes(os.urandom(2), "big") % 90000  # a seed nobody chose in advance
+    _generation.clear()
+    _generation.update(state="generating", seed=seed)
+    threading.Thread(target=_generate, args=(seed,), daemon=True).start()
+    return dict(_generation)
+
+
+@app.post("/api/datasets/use")
+def datasets_use(body: dict[str, Any]) -> dict[str, Any]:
+    seed = int(body.get("seed", -1))
+    if seed not in _available_seeds():
+        raise HTTPException(404, f"No generated dataset for seed {seed}")
+    with _lock:
+        _state["d"] = DemoDirector(seed=seed)
+        _assistants.clear()
+        return _state_payload(_state["d"])
 
 
 @app.post("/api/clock/advance")
@@ -110,7 +226,7 @@ def advance(days: int = 1) -> dict[str, Any]:
     with _lock:
         d = director()
         if d.merchant_id not in d.rt.connected:
-            raise HTTPException(409, "Connect the merchant first: run the demo to the audit step.")
+            raise HTTPException(409, "Connect a merchant first.")
         d.rt.advance(max(1, min(days, 30)))
         return _state_payload(d)
 
@@ -118,8 +234,9 @@ def advance(days: int = 1) -> dict[str, Any]:
 @app.get("/api/cases")
 def cases() -> list[dict[str, Any]]:
     with _lock:
-        rt = director().rt
-        return [c.summary() for c in sorted(rt.cases.all(), key=lambda c: (c.month, c.case_id), reverse=True)]
+        d = director()
+        return [c.summary() for c in sorted(d.rt.cases.all(d.merchant_id), key=lambda c: (c.month, c.case_id),
+                                            reverse=True)]
 
 
 @app.get("/api/cases/{case_id}")
@@ -135,7 +252,8 @@ def case(case_id: str) -> dict[str, Any]:
 @app.get("/api/human-queue")
 def queue() -> list[dict[str, Any]]:
     with _lock:
-        return human_queue(director().rt)
+        d = director()
+        return [c for c in human_queue(d.rt) if c["merchant_id"] == d.merchant_id]
 
 
 @app.post("/api/cases/{case_id}/review")
@@ -162,7 +280,8 @@ def delays() -> dict[str, Any]:
 @app.get("/api/root-causes")
 def root_causes() -> list[dict[str, Any]]:
     with _lock:
-        return [rc.summary() for rc in director().rt.root_causes()]
+        d = director()
+        return [rc.summary() for rc in d.rt.root_causes(d.merchant_id)]
 
 
 @app.get("/api/network")

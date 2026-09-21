@@ -24,9 +24,33 @@ If the server stops mid-demo, the page shows a banner and reconnects on its own.
 
 Backup: `python demo.py` tells the same story in a terminal in about 12 seconds.
 
-## The story
+## Live demo (the default screen)
 
-Press **Run next step** for each beat (or **Play the story** to auto-advance).
+The command center opens in live operation: no steps, no captions. You narrate
+while the system works.
+
+1. **Let a judge pick the merchant.** The dropdown lists all 25 merchants with full
+   ledgers, each with a different business and different problems. Press
+   **Connect merchant**: the Monitor audits twelve months on its own and cases
+   appear in the feed as they are found.
+2. **Open any case**, not a chosen one: the drawer shows the evidence chain, the
+   rule and the recomputed proof.
+3. **Run live.** Virtual time moves one day every 4 seconds. New settlements
+   arrive, the Follow-up agent files, chases and re-presents, and money comes
+   back, with nobody pressing anything. Press **Pause** to talk.
+4. **Impact tab** for the before and after; **Needs review** to file or dismiss
+   what the system would not guess; **Merchant chat ↗** for the merchant's side.
+5. **Red team** and **Baseline** tabs: run them on demand in front of the judges.
+6. **"Is this hard-coded?"** Press **Generate a fresh dataset**: a brand-new random
+   seed (about 35 seconds for 25 merchants, 12 months and a clean copy), then
+   **Switch to it** and connect any merchant. The figures change; the behaviour
+   does not.
+
+## Guided tour (backup)
+
+**Guided tour** in the header swaps in the scripted walk-through below, for when
+a presenter wants fixed beats. It runs the same system; press **Exit tour** to
+return. Press **Run next step** for each beat (or **Play the tour**).
 
 | # | On screen | Say |
 |---|---|---|

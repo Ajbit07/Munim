@@ -215,9 +215,144 @@ function renderState(s) {
   }
   const finished = s.steps.every((st) => st.done);
   $("btn-next").disabled = finished;
-  $("btn-next").textContent = finished ? "Story complete" : "Run next step";
+  $("btn-next").textContent = finished ? "Tour complete" : "Run next step";
   $("btn-advance").disabled = !merchant.connected;
+  $("btn-live").disabled = !merchant.connected;
+  renderLive(s);
 }
+
+// -- live operation ----------------------------------------------------------------------------
+
+let merchantsLoaded = null;
+let liveTimer = null;
+let pendingMerchant = null;  // picked in the dropdown but not connected yet
+
+async function loadMerchants(force = false) {
+  if (merchantsLoaded && !force) return;
+  const list = await (await fetch("/api/merchants")).json();
+  merchantsLoaded = list;
+  $("merchant-select").innerHTML = list.map((m) =>
+    `<option value="${m.merchant_id}">${esc(m.legal_name)} · ${esc(m.city)}${m.connected ? " ✓" : ""}</option>`).join("");
+}
+
+function renderLive(s) {
+  const m = s.merchant;
+  $("ds-seed").textContent = `seed ${s.dataset.seed}`;
+  $("ds-merchants").textContent = s.dataset.merchants;
+  $("ds-through").textContent = niceDate(s.dataset.data_through);
+  $("live-clock").textContent = `${niceDate(s.today)} · ${liveTimer ? "running: one day every 4 seconds" : "paused"}`;
+  if (pendingMerchant) return;  // leave the user's pick alone until they connect it
+  if (merchantsLoaded) {
+    $("merchant-select").value = m.merchant_id;
+    const current = merchantsLoaded.find((x) => x.merchant_id === m.merchant_id);
+    if (current && current.connected !== m.connected) loadMerchants(true);
+  }
+  $("btn-connect").textContent = m.connected ? "Connected ✓" : "Connect merchant";
+  $("btn-connect").disabled = m.connected;
+  if (!m.connected) {
+    $("live-title").textContent = `${m.legal_name} is not connected`;
+    $("live-narrative").textContent = "Connecting starts the Monitor agent on twelve months of this merchant's settlements. Pick any merchant: each has a different ledger and different problems.";
+  } else {
+    const x = s.metrics;
+    $("live-title").textContent = x.identified_paise ? `${x.proven_cases} proven cases for ${m.legal_name}` : `${m.legal_name}: every settlement reconciles`;
+    $("live-narrative").textContent = liveTimer
+      ? "Time is running. New settlements arrive, the Monitor reconciles them, and the Follow-up agent chases open corrections, all without anyone pressing a button."
+      : "Press Run live to let time pass: the agents keep working on their own. Open any case to see its proof.";
+  }
+}
+
+function setLive(on) {
+  if (on && !liveTimer) {
+    liveTimer = setInterval(async () => {
+      if (busy) return;
+      await act("/api/clock/advance?days=1", { quiet: true });
+    }, 4000);
+  } else if (!on && liveTimer) {
+    clearInterval(liveTimer);
+    liveTimer = null;
+  }
+  $("btn-live").setAttribute("aria-pressed", String(on));
+  $("btn-live").textContent = on ? "Pause" : "Run live";
+  if (state) renderLive(state);
+}
+
+$("btn-live").addEventListener("click", () => setLive(!liveTimer));
+
+$("merchant-select").addEventListener("change", async () => {
+  const id = $("merchant-select").value;
+  const known = merchantsLoaded?.find((x) => x.merchant_id === id);
+  if (known?.connected) {
+    pendingMerchant = null;
+    await act("/api/live/select", { body: { merchant_id: id } });
+    openDrawer(false);
+  } else {
+    // Show who is selected; connecting is the explicit, visible act that starts the agents.
+    pendingMerchant = id;
+    $("btn-connect").textContent = "Connect merchant";
+    $("btn-connect").disabled = false;
+    $("live-title").textContent = `${known?.legal_name || id} is not connected`;
+  }
+});
+
+$("btn-connect").addEventListener("click", async () => {
+  const id = $("merchant-select").value;
+  pendingMerchant = null;
+  await act("/api/live/select", { body: { merchant_id: id } });
+  await loadMerchants(true);
+  openDrawer(false);
+  selectTab("cases");
+});
+
+// -- fresh datasets ------------------------------------------------------------------------------
+
+let datasetPoll = null;
+
+async function refreshDatasets() {
+  const d = await (await fetch("/api/datasets")).json();
+  const g = d.generation || {};
+  const el = $("ds-status");
+  if (g.state === "generating") {
+    el.textContent = `Generating seed ${g.seed}: 25 merchants, 12 months, plus a clean copy…`;
+    $("btn-dataset").disabled = true;
+  } else if (g.state === "ready" && g.seed !== d.current) {
+    el.innerHTML = `Seed ${g.seed} generated in ${g.seconds}s. <button class="btn btn-solid btn-sm" id="btn-use-seed">Switch to it</button>`;
+    $("btn-use-seed").addEventListener("click", () => useSeed(g.seed));
+    $("btn-dataset").disabled = false;
+  } else if (g.state === "failed") {
+    el.textContent = `Generation failed: ${g.error}`;
+    $("btn-dataset").disabled = false;
+  } else {
+    el.textContent = "";
+    $("btn-dataset").disabled = false;
+  }
+  if (g.state !== "generating" && datasetPoll) { clearInterval(datasetPoll); datasetPoll = null; }
+}
+
+async function useSeed(seed) {
+  setLive(false);
+  eventCursor = 0; feedItems.length = 0; showcaseId = null; $("feed").innerHTML = "";
+  openDrawer(false);
+  await act("/api/datasets/use", { body: { seed } });
+  await loadMerchants(true);
+  await refreshDatasets();
+  selectTab("cases");
+}
+
+$("btn-dataset").addEventListener("click", async () => {
+  const res = await fetch("/api/datasets/new", { method: "POST" });
+  if (!res.ok) { toast((await res.json()).detail || "Could not start generation"); return; }
+  await refreshDatasets();
+  datasetPoll = setInterval(refreshDatasets, 2000);
+});
+
+// -- guided tour (the scripted walk-through, for presenting) --------------------------------------
+
+function setTour(on) {
+  document.body.classList.toggle("tour", on);
+  if (on) setLive(false);
+}
+$("btn-tour").addEventListener("click", () => setTour(!document.body.classList.contains("tour")));
+$("btn-exit-tour").addEventListener("click", () => setTour(false));
 
 let offlineTimer = null;
 
@@ -271,6 +406,11 @@ async function renderActiveTab() {
     row.addEventListener("click", () => openCase(row.dataset.case));
     row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === row) openCase(row.dataset.case); });
   });
+  el.querySelectorAll("[data-run]").forEach((btn) => btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Running…";
+    await act(btn.dataset.run);
+  }));
   el.querySelectorAll("[data-review]").forEach((btn) => btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
     askReview(btn);
@@ -384,7 +524,8 @@ const TABS = {
 
   async redteam() {
     const r = state?.redteam;
-    if (!r) return `<p class="empty">Not run yet. Step 10 fires legitimate charges built to look like violations, plus genuine issues, through the real system.</p>`;
+    if (!r) return `<p class="empty">Not run yet. The red team generates legitimate charges built to look like violations, plus genuine issues, and runs them through the real system.</p>
+      <button class="btn btn-solid" data-run="/api/redteam/run">Run the red team now</button>`;
     return `<div class="summary-strip">${stat("adversarial tests", r.generated)}${stat("correctly rejected", r.correctly_rejected)}${stat("sent for review", r.correctly_escalated)}${stat("genuine issues claimed", `${r.controls_claimed}/${r.controls}`)}${stat("false claims", r.false_claims, r.false_claims ? "" : "good")}</div>
       <table class="grid"><thead><tr><th>Test</th><th>Expected</th><th>Teammate did</th><th>Result</th></tr></thead><tbody>` +
       r.scenarios.map((sc) => `<tr><td>${esc(sc.explanation)}</td><td>${sc.expected.replaceAll("_", " ").toLowerCase()}</td><td>${sc.actual.replaceAll("_", " ").toLowerCase()}</td>
@@ -393,14 +534,18 @@ const TABS = {
 
   async baseline() {
     const b = state?.baseline;
-    if (!b) return `<p class="empty">Not run yet. Step 11 audits the same merchant's ledger with nothing wrong in it.</p>`;
+    if (!b) return `<p class="empty">Not run yet. This audits the same merchant's ledger with nothing wrong planted in it.</p>
+      <button class="btn btn-solid" data-run="/api/baseline/run">Run the clean baseline</button>`;
     return `<p class="note">Same merchant, same ${b.lines.toLocaleString("en-IN")} settlement lines, with nothing wrong. A teammate that invents findings would show numbers here.</p>
       <div class="summary-strip">${stat("discrepancies proven", b.proven_cases, "good")}${stat("claims filed", b.claims_filed, "good")}${stat("recovered", rupees(b.recovered_paise), "good")}${stat("sent for review", b.escalated, "good")}${stat("batches reconciled", b.batches)}</div>`;
   },
 
   async message() {
-    const step = state?.last_step?.key === "notify" ? state.last_step.data : null;
-    if (!step) return `<p class="empty">The merchant hears from the teammate at the end of the story (step 12).</p>`;
+    const step = state?.notification;
+    if (!step) return state?.merchant.connected
+      ? `<p class="empty">Compose the one-sentence update the merchant receives.</p>
+         <button class="btn btn-solid" data-run="/api/notify">Compose merchant update</button>`
+      : `<p class="empty">Connect a merchant first.</p>`;
     return `<div class="notif-wrap">
       <div class="phone"><div class="phone-screen">
         <div class="phone-time">9:41</div>
@@ -546,20 +691,22 @@ function toast(message) {
   toast.timer = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
-async function act(url) {
+async function act(url, { body = null, quiet = false } = {}) {
   if (busy) return null;
   busy = true;
   $("busy").hidden = false;
-  document.querySelectorAll(".controls .btn").forEach((b) => { if (b.id !== "btn-auto") b.disabled = true; });
+  if (!quiet) document.querySelectorAll(".controls .btn").forEach((b) => { if (!["btn-auto", "btn-live"].includes(b.id)) b.disabled = true; });
   const poll = setInterval(pullEvents, 600);
   try {
-    const res = await fetch(url, { method: "POST" });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.detail || res.statusText);
-    return body;
+    const res = await fetch(url, body ? {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    } : { method: "POST" });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || res.statusText);
+    return payload;
   } catch (err) {
     if (err instanceof TypeError) setOffline(true);  // network failure: the banner explains and retries
-    else toast(err.message);
+    else { toast(err.message); if (quiet) setLive(false); }
     return null;
   } finally {
     clearInterval(poll);
@@ -586,6 +733,7 @@ $("btn-chat").addEventListener("click", () => {
 
 $("btn-reset").addEventListener("click", async () => {
   autoplay = false;
+  setLive(false);
   $("btn-auto").setAttribute("aria-pressed", "false");
   eventCursor = 0; feedItems.length = 0; showcaseId = null; $("feed").innerHTML = "";
   openDrawer(false);
@@ -595,7 +743,7 @@ $("btn-reset").addEventListener("click", async () => {
 $("btn-auto").addEventListener("click", async () => {
   autoplay = !autoplay;
   $("btn-auto").setAttribute("aria-pressed", String(autoplay));
-  $("btn-auto").textContent = autoplay ? "Pause story" : "Play the story";
+  $("btn-auto").textContent = autoplay ? "Pause tour" : "Play the tour";
   while (autoplay && !state.steps.every((st) => st.done)) {
     $("btn-next").click();
     await new Promise((r) => setTimeout(r, 400));
@@ -604,7 +752,7 @@ $("btn-auto").addEventListener("click", async () => {
   }
   autoplay = false;
   $("btn-auto").setAttribute("aria-pressed", "false");
-  $("btn-auto").textContent = "Play the story";
+  $("btn-auto").textContent = "Play the tour";
 });
 
-refreshAll();
+loadMerchants().then(refreshAll).then(refreshDatasets);

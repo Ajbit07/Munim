@@ -23,11 +23,22 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           <span id="today">—</span>
         </div>
-        <div class="controls">
+        <div class="controls live-only">
+          <label class="merchant-pick"><span class="sr">Merchant</span>
+            <select id="merchant-select" aria-label="Merchant"></select>
+          </label>
+          <button class="btn btn-primary" id="btn-connect">Connect merchant</button>
+          <button class="btn btn-ghost" id="btn-live" aria-pressed="false" title="Let virtual time run: new settlements arrive and the agents act on their own">Run live</button>
+          <button class="btn btn-ghost" id="btn-advance">+1 day</button>
+        </div>
+        <div class="controls tour-only">
           <button class="btn btn-primary" id="btn-next">Run next step</button>
-          <button class="btn btn-ghost" id="btn-auto" aria-pressed="false">Play the story</button>
-          <button class="btn btn-ghost" id="btn-advance">Advance 1 day</button>
+          <button class="btn btn-ghost" id="btn-auto" aria-pressed="false">Play the tour</button>
+          <button class="btn btn-link" id="btn-exit-tour">Exit tour</button>
+        </div>
+        <div class="controls">
           <button class="btn btn-ghost" id="btn-chat" title="Opens the merchant's chat in a separate window">Merchant chat ↗</button>
+          <button class="btn btn-link" id="btn-tour" title="A scripted walk-through of the same system, for presenting">Guided tour</button>
           <button class="btn btn-link" id="btn-reset">Start over</button>
         </div>
       </div>
@@ -60,7 +71,21 @@
         <div class="hero-line" id="thesis-line">The teammate has not started yet.</div>
       </div>
 
-      <div class="step-card">
+      <div class="step-card live-card live-only">
+        <div class="step-eyebrow">Live operation</div>
+        <div class="step-title" id="live-title">Pick any merchant and connect it</div>
+        <div class="step-narrative" id="live-narrative">Nothing on this screen is pre-computed. Connecting starts the agents on that merchant's twelve months of settlements; they decide what to do on their own.</div>
+        <dl class="live-facts">
+          <dt>Dataset</dt><dd><span id="ds-seed">—</span> · <span id="ds-merchants">—</span> merchants with full ledgers · data through <span id="ds-through">—</span></dd>
+          <dt>Clock</dt><dd id="live-clock">Paused</dd>
+        </dl>
+        <div class="dataset-row">
+          <button class="btn btn-outline btn-sm" id="btn-dataset" title="Generate a brand-new random dataset (about 30 seconds) and run on it">Generate a fresh dataset</button>
+          <span id="ds-status" class="ds-status"></span>
+        </div>
+      </div>
+
+      <div class="step-card tour-only">
         <div class="step-eyebrow" id="step-eyebrow">Ready</div>
         <div class="step-title" id="step-title">Run the first step to begin the story</div>
         <div class="step-narrative" id="step-narrative">Each step runs the real system. Every number here is computed, not typed in.</div>
@@ -112,7 +137,7 @@
         <span class="live" id="busy" hidden><span class="dot"></span>Working</span>
       </div>
       <ol class="feed" id="feed"></ol>
-      <p class="empty" id="feed-empty">Nothing yet. The agents start on their own once the story begins.</p>
+      <p class="empty" id="feed-empty">Nothing yet. Connect a merchant and the agents start on their own.</p>
     </section>
 
     <section class="panel bench" aria-label="Details">

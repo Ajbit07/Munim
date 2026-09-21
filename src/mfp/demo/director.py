@@ -51,6 +51,7 @@ class DemoDirector:
         self.showcase: Case | None = None
         self.redteam: dict[str, Any] | None = None
         self.baseline: dict[str, Any] | None = None
+        self.notification: dict[str, Any] | None = None
         self.steps = [
             Step("zero_complaints", "No one has complained",
                  "The merchant has not reported a problem, opened a ticket, or asked a question. Paytm checks anyway.", self._zero),
@@ -77,6 +78,39 @@ class DemoDirector:
             Step("notify", "Tell the merchant, in one sentence",
                  "The merchant did not ask. Paytm found its own error, proved it, corrected it and followed it through.", self._notify),
         ]
+
+    # -- live operation: any merchant, on demand ----------------------------------------------
+
+    def merchants(self) -> list[dict[str, Any]]:
+        """Every merchant with a full ledger in this dataset, not only the demo's hero."""
+        out = []
+        for mid in self.rt.index.merchant_ids("FULL"):
+            m = self.rt.dataset.merchant(mid)
+            out.append({"merchant_id": mid, "legal_name": m.legal_name, "city": m.city, "mcc": m.registered_mcc,
+                        "acquirer": m.acquirer_id, "connected": mid in self.rt.connected})
+        return out
+
+    def select(self, merchant_id: str) -> dict[str, Any]:
+        """Focus on a merchant, connecting it if needed: the Monitor then audits it unprompted."""
+        if merchant_id not in self.rt.index.merchant_ids("FULL"):
+            raise KeyError(merchant_id)
+        self.merchant_id = merchant_id
+        self.notification = None
+        self.baseline = None
+        if merchant_id not in self.rt.connected:
+            self._wake()
+            self.rt.connect(merchant_id)
+        return self.rt.metrics(merchant_id)
+
+    def run_redteam(self) -> dict[str, Any]:
+        return self._red_team()
+
+    def run_baseline(self) -> dict[str, Any]:
+        return self._baseline()
+
+    def compose_notification(self) -> dict[str, Any]:
+        self.notification = self._notify()
+        return self.notification
 
     # -- driving --------------------------------------------------------------
 
@@ -195,5 +229,6 @@ class DemoDirector:
 
     def _notify(self) -> dict[str, Any]:
         message = self.rt.notification(self.merchant_id)
-        return {"text": message.text, "english": message.english, "language": message.language,
-                "channel": message.channel, "source": message.source}
+        self.notification = {"text": message.text, "english": message.english, "language": message.language,
+                             "channel": message.channel, "source": message.source}
+        return self.notification

@@ -46,3 +46,29 @@ def test_api_serves_state_steps_cases_and_ui(loop_datasets):
     assert events["next"] > 0 and events["events"][0]["kind"] == "system.started"
     assert client.get("/api/cases/NOPE").status_code == 404
     server._state.clear()
+
+
+def test_live_mode_runs_any_merchant_on_demand(loop_datasets):
+    from fastapi.testclient import TestClient
+
+    from mfp.demo import server
+
+    server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
+    server._assistants.clear()
+    client = TestClient(server.app)
+    merchants = client.get("/api/merchants").json()
+    assert len(merchants) > 1 and not any(m["connected"] for m in merchants)
+    other = merchants[1]["merchant_id"]  # deliberately not the demo's hero
+    state = client.post("/api/live/select", json={"merchant_id": other}).json()
+    assert state["merchant"]["merchant_id"] == other and state["merchant"]["connected"]
+    assert all(c["merchant_id"] == other for c in client.get("/api/cases").json())
+    assert client.post("/api/live/select", json={"merchant_id": "NOPE"}).status_code == 404
+    before = client.get("/api/state").json()["today"]
+    assert client.post("/api/clock/advance?days=2").json()["today"] > before
+    assert client.post("/api/redteam/run").json()["redteam"]["false_claims"] == 0
+    assert client.post("/api/notify").json()["notification"]["text"]
+    assert client.post("/api/datasets/use", json={"seed": 999999}).status_code == 404
+    listing = client.get("/api/datasets").json()
+    assert listing["generation"]["state"] in ("idle", "ready", "failed", "generating")
+    server._state.clear()
+    server._assistants.clear()
