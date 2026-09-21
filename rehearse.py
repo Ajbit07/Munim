@@ -60,6 +60,15 @@ def main() -> int:
             record("ok" if done.returncode == 0 else "fail", f"{name} dataset generated",
                    "" if done.returncode == 0 else done.stderr.strip()[-200:])
 
+    sample = ROOT / "samples" / f"paytm_settlement_report_MER-0001_seed{args.seed}.csv"
+    if sample.exists():
+        record("ok", "sample Paytm settlement report present")
+    else:
+        done = subprocess.run([sys.executable, str(ROOT / "tools" / "export_paytm_report.py"), "--seed", str(args.seed)],
+                              capture_output=True, text=True)
+        record("ok" if done.returncode == 0 else "warn", "sample Paytm settlement report generated",
+               "" if done.returncode == 0 else "the Import report tab's sample button will not work")
+
     print("\n2. The twelve-step story")
     started = time.perf_counter()
     director = DemoDirector(data_dir=data, seed=args.seed)

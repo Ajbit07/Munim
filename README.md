@@ -167,6 +167,35 @@ What else the merchant can do from the chat:
 - **Hear back without asking**: refunds landing in the bank (with UTR), replies
   from the team, and appeal outcomes all arrive in the chat on their own.
 
+### Auditing a real Paytm settlement report
+
+The ops console's **Import report** tab takes a settlement report as downloaded
+from the Paytm merchant dashboard (Reports → Settlements, CSV). The importer
+reads Paytm's published columns (Transaction ID, Order ID, Transaction Date,
+Transaction Type, Status, Amount, Commission, GST, Settled Amount, Settled Date,
+UTR No., Payment Mode; see [Paytm's settlement report docs](https://www.paytmpayments.com/docs/settlement-reports-on-dashboard))
+and the Settlement API's camelCase names. What the report does not carry (the
+merchant's category, agreed rates, turnover, e-commerce status, settlement
+timeline) is entered on the form. The same engines then audit it live, and the
+merchant's chat works on it like any other merchant.
+
+Rows the engines cannot judge are counted and set aside, never guessed: pending
+payments, unsupported payment modes, rental and other deduction rows, refunds
+whose original payment is not in the file, and rows whose settled amount does
+not add up. The report's UTRs stand in for the bank statement.
+
+To try it without a real report, **Use the sample report** loads the hero's
+twelve months exported in Paytm's format (48,590 rows; `python rehearse.py`
+creates it):
+
+```bash
+python tools/export_paytm_report.py
+```
+
+Round trip on that sample: ₹24,717.17 found across 23 proven cases in about
+3 seconds, which is the full audit minus the ₹995 soundbox rental (device
+records are not part of a settlement report).
+
 The command center's **Impact** tab shows the same merchant with and without the
 teammate: money lost, problems they would have had to find, lines to check by
 hand, and future charges, against money returned, complaints raised (zero) and
