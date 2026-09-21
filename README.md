@@ -96,7 +96,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (211, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (214, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -161,6 +161,9 @@ What else the merchant can do from the chat:
   ticket; their reply arrives in the chat.
 - **Appeal** a case closed without recovery, with a reason; the ops desk decides
   and the outcome arrives in the chat.
+- **Say it any way**: the model reads every message and recognises these requests
+  in any wording or script ("yeh case band kyun kar diya", "मेरा केस वापस खोलो",
+  "koi banda hai jisse baat ho sake?"); keywords are only a fast path.
 - **Hear back without asking**: refunds landing in the bank (with UTR), replies
   from the team, and appeal outcomes all arrive in the chat on their own.
 
@@ -285,5 +288,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             211 tests incl. firewall canaries and an offline rehearsal
+tests/             214 tests incl. firewall canaries and an offline rehearsal
 ```

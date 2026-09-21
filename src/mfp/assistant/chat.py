@@ -164,12 +164,17 @@ KEYWORDS = [  # order is priority
                  "card", "wallet")),
     ("review", ("review", "verify", "approve", "mujhe kya", "kya karna", "kuch karna", "karna hai", "karna padega",
                 "what should i", "do i need", "action", "sign")),
-    ("prevent", ("future", "aage", "dobara", "again", "stop", "band", "fix", "root", "kyun ho raha")),
+    ("prevent", ("future", "aage", "dobara hoga", "again", "stop", "band hoga", "band ho", "band karo", "fix",
+                 "root", "kyun ho raha")),
     ("recovered", ("recover", "wapas", "back", "return", "credited", "mila", "refunded")),
     ("greet", ("hi", "hello", "namaste", "namaskar", "hey", "good morning", "thanks", "thank you", "thank u",
                "shukriya", "dhanyavad", "dhanyawad", "theek hai", "ok", "okay", "accha", "achha")),
 ]
 TOPIC_HELP = {
+    "appeal": "disagrees with a decision or a closed or rejected case and wants it looked at again or reopened",
+    "handoff": "wants to talk to a human, Paytm staff, an agent or customer care, or wants a call",
+    "proof": "wants proof or evidence, a UTR or reference number, or asks how Paytm knows a charge was wrong",
+    "payment": "asks where one specific customer payment is, or whether a particular payment has settled",
     "summary": "overall: how much money was found or returned",
     "rental": "soundbox / device / machine rental charged, including after returning it",
     "late": "settlement arrived late, or when money will come",
@@ -182,6 +187,15 @@ TOPIC_HELP = {
     "greet": "greeting or thanks only",
     "other": "anything else",
 }
+CLASSIFIER_EXAMPLES = (  # a few worked examples; the model generalises from these to any wording
+    ("yeh case band kyun kar diya, mujhe paisa chahiye", "appeal"),
+    ("aapne galat reject kiya, phir se dekho", "appeal"),
+    ("kisi se phone pe baat karni hai", "handoff"),
+    ("mujhe kaise pata ki yeh sahi hai?", "proof"),
+    ("kal ka 500 wala payment kahan gaya", "payment"),
+    ("aage se yeh charge lagega kya?", "prevent"),
+)
+EXPLICIT = ("handoff", "appeal", "proof", "payment")   # requests the merchant makes, not subjects they ask about
 HINGLISH_WORDS = {"hai", "hain", "kya", "kyun", "kyon", "mera", "mere", "meri", "paisa", "paise", "nahi", "nahin",
                   "kab", "aap", "kitna", "hua", "gaya", "gaye", "kar", "karo", "kata", "kaat", "bhai", "ji", "aaya",
                   "mila", "wapas", "kaise", "yeh", "ye", "tha", "thi", "ho", "hoga", "diya", "liye", "se", "ka", "ki",
@@ -508,16 +522,19 @@ class MerchantAssistant:
                     "Paytm will never ask for your OTP, PIN, password or CVV. Please do not share them with anyone.")
             return self._out(text, language, "safety", ["safety"], Facts(), started, None, "keywords")
         topics, understood_by = (topics_override, "paytm") if topics_override else (_topics(question), "keywords")
-        if not topics_override and topics[0] not in ("handoff", "appeal", "proof") and parse_payment_query(
+        if not topics_override and topics[0] not in EXPLICIT and parse_payment_query(
                 question, self.rt.clock.today().year):
             topics = ["payment"]
-        if topics[0] in ("handoff", "appeal", "proof", "payment"):
+        if not topics_override and topics[0] not in EXPLICIT and topics != ["greet"] and len(question) > 3:
+            # The model reads every message: it recognises the merchant's requests (appeal, proof, a person,
+            # one payment) in any wording or script, and places what the keywords could not. For ordinary
+            # subjects the keywords stay in charge; they were more accurate than a small model there.
+            classified = self._classify(question)
+            if classified and (classified in EXPLICIT or topics == ["summary"]):
+                topics, understood_by = [classified], self._classifier_name()
+        if topics[0] in EXPLICIT:
             topics = topics[:1]  # an explicit request is answered on its own
         self._question, self._history = question, history or []
-        if not topics_override and topics == ["summary"] and len(question) > 3:
-            classified = self._classify(question)
-            if classified:
-                topics, understood_by = [classified], self._classifier_name()
         with self.lock:
             facts = self._facts(topics, question)
             system = self._system(language)
@@ -679,6 +696,8 @@ class MerchantAssistant:
         """Ask a model which topic an unplaced message is about. The answer only picks which facts to read."""
         system = ("Classify a small Indian merchant's chat message about their Paytm settlements into one topic:\n"
                   + "\n".join(f"- {k}: {v}" for k, v in TOPIC_HELP.items())
+                  + "\nExamples:\n"
+                  + "\n".join(f'- "{q}" -> {t}' for q, t in CLASSIFIER_EXAMPLES)
                   + '\nReply with JSON only: {"topic": "<one topic>"}')
         messages = [{"role": "user", "content": question}]
         schema = {"type": "object", "properties": {"topic": {"type": "string", "enum": list(TOPIC_HELP)}},
@@ -835,6 +854,12 @@ class MerchantAssistant:
         rt = self.rt
         parsed = parse_payment_query(self._question, rt.clock.today().year) or (set(), None)
         amounts, day = parsed
+        if not amounts and day is None:
+            f.cards["payments"] = []
+            f.draft_en.append("Which payment? Tell me the amount and the date, for example \"8 Sep, ₹2,113\", and I "
+                              "will find it.")
+            f.draft_hi.append("Kaunsa payment? Amount aur date batayiye, jaise \"8 Sep, ₹2,113\", main dhoondh dunga.")
+            return
         view = rt.view(self.merchant_id)
         today = rt.observed_through()
         late = {b.txn_id: b for b in rt.sla_breaches.get(self.merchant_id, [])}

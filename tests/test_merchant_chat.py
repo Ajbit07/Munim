@@ -154,7 +154,7 @@ def test_the_local_model_writes_replies_unless_switched_off(rt, monkeypatch):
     monkeypatch.setenv("MFP_LOCAL_WRITES", "0")
     local = FakeLocal(reply)
     r = MerchantAssistant(rt, HERO, chain(local=local)).reply("Kitna paisa wapas aaya?", "hinglish")
-    assert r["source"] == "template" and local.calls == []
+    assert r["source"] == "template" and False not in local.calls  # it may still classify; it never writes
 
 
 def test_money_under_review_can_never_be_called_returned(rt):
@@ -494,3 +494,24 @@ def test_only_a_person_can_reopen_a_closed_case(fresh):
 
     with pytest.raises(IllegalTransition):
         fresh.state_machine.transition(closed, CaseState.ESCALATED, Actor.FOLLOWUP_AGENT, "agent reopening")
+
+
+def test_the_model_recognises_requests_in_any_wording(fresh):
+    appeal = FakeLocal(topic="appeal")
+    r = MerchantAssistant(fresh, HERO, chain(local=appeal)).reply("yeh case band kyun kar diya, mujhe paisa chahiye", "auto")
+    assert r["topics"] == ["appeal"] and r["understood_by"] == "local:fake"
+    person = FakeLocal(topic="handoff")
+    r = MerchantAssistant(fresh, HERO, chain(local=person)).reply("आपके किसी आदमी से बात हो सकती है?", "auto")
+    assert r["topics"] == ["handoff"] and r["ticket"]["topic"] == "handoff"
+
+
+def test_keywords_keep_ordinary_subjects_even_if_the_model_disagrees(fresh):
+    wrong = FakeLocal(topic="rental")
+    r = MerchantAssistant(fresh, HERO, chain(local=wrong)).reply("GST ke baare mein batao", "hinglish")
+    assert r["topics"] == ["tax"]
+
+
+def test_a_payment_request_without_details_asks_which_payment(fresh):
+    model = FakeLocal(topic="payment")
+    r = MerchantAssistant(fresh, HERO, chain(local=model)).reply("mera ek customer ka paisa nahi dikh raha", "hinglish")
+    assert r["topics"] == ["payment"] and r["payments"] == [] and "Kaunsa payment" in r["reply"]
