@@ -185,6 +185,7 @@ SUGGESTIONS = {
     "rental": ["Kitna rental wapas milega?", "Total kitna paisa mila?"],
     "late": ["Kya late payment ka paisa milega?", "Total kitna recover hua?"],
     "review": ["Wallet charge kya hai?", "Total kitna recover hua?"],
+    "proactive": ["Soundbox rental kyun kata?", "Kya mujhe kuch karna hai?", "Aage se yeh band hoga?"],
 }
 
 
@@ -275,6 +276,11 @@ RETURNED_WORDS = ("wapas", "return", "credited", "credit ho", "back in your", "m
 PENDING_WORDS = ("review", "approve", "dismiss", "verify", "progress", "chal rahi", "pending", "समीक्षा", "प्रक्रिया")
 
 
+OVERCLAIM = re.compile(r"sab (set|theek|thik|sorted|done|clear)|everything (is|has been) (fixed|sorted|settled|done|resolved)"
+                       r"|all (fixed|sorted|settled|resolved)|सब (ठीक|सेट)|kuch (bhi )?baaki nahi|nothing (is )?(left|pending)",
+                       re.IGNORECASE)
+
+
 def claims_returned(reply: str, not_returned_paise: set[int]) -> str | None:
     """A sentence that calls money 'returned' while naming an amount still under review or in progress."""
     if not not_returned_paise:
@@ -362,8 +368,27 @@ class MerchantAssistant:
                 "languages": [{"code": k, "label": v} for k, v in LANGUAGE_LABELS.items()],
                 "suggestions": SUGGESTIONS["summary"]}
 
+    def proactive(self, language: str = "hinglish") -> dict[str, Any]:
+        """Paytm messages the merchant first: what it found and fixed, without being asked."""
+        result = self.reply("", language if language in LANGUAGES else "hinglish", None, topics_override=["proactive"])
+        result["proactive"] = True
+        return result
+
+    def transcribe(self, audio: bytes, content_type: str) -> dict[str, Any] | None:
+        """The merchant's voice note as text (Sarvam speech-to-text); None when Sarvam is not configured."""
+        client = self.backends.sarvam.client
+        if not client.configured or not audio:
+            return None
+        try:
+            out = client.transcribe(audio, content_type)
+        except (*NETWORK_ERRORS, BackendError):
+            return None
+        code = out.get("language_code") or ""
+        return {"text": out.get("transcript", "").strip(),
+                "language": code if code in LANGUAGES and code != "hi-IN" else detect_language(out.get("transcript", ""))}
+
     def reply(self, question: str, language: str = "auto",
-              history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+              history: list[dict[str, str]] | None = None, *, topics_override: list[str] | None = None) -> dict[str, Any]:
         """Answer one merchant message.
 
         Sarvam (when configured) writes a conversational answer from the facts in
@@ -381,8 +406,8 @@ class MerchantAssistant:
                     if language in ("hinglish", "hi-IN") else
                     "Paytm will never ask for your OTP, PIN, password or CVV. Please do not share them with anyone.")
             return self._out(text, language, "safety", ["safety"], Facts(), started, None, "keywords")
-        topics, understood_by = _topics(question), "keywords"
-        if topics == ["summary"] and len(question) > 3:
+        topics, understood_by = (topics_override, "paytm") if topics_override else (_topics(question), "keywords")
+        if not topics_override and topics == ["summary"] and len(question) > 3:
             classified = self._classify(question)
             if classified:
                 topics, understood_by = [classified], self._classifier_name()
@@ -418,12 +443,12 @@ class MerchantAssistant:
             translated = self._translate(draft, language)  # Sarvam's translation model, when configured
             if translated:
                 text, source, note2 = self._vet(translated, draft, language, known_paise, "sarvam:mayura", strict=True)
-                note = note2 or note
+                note = note2  # a successful translation supersedes an earlier rejection
             elif local.available():
                 try:
                     candidate = local.complete(self._polish_system(language), self._polish_messages(question, draft))
                     text, source, note2 = self._vet(candidate, draft, language, known_paise, local.name, strict=True)
-                    note = note2 or note
+                    note = note2  # a successful translation supersedes an earlier rejection
                 except (*NETWORK_ERRORS, BackendError) as exc:
                     note = f"{local.name} unavailable ({type(exc).__name__})"
             if source == "template":
@@ -453,6 +478,9 @@ class MerchantAssistant:
                                            "which is not in the records; the checked answer was used")
             if not amounts_in(draft) and amounts_in(candidate):
                 return draft, "template", f"{name} added an amount the answer does not need; the checked answer was used"
+            if not_returned and OVERCLAIM.search(candidate):
+                return draft, "template", (f"{name} said everything is settled while money is still under review "
+                                           "or in progress; the checked answer was used")
             misstated = claims_returned(candidate, not_returned or set())
             if misstated:
                 return draft, "template", (f"{name} described {misstated} as returned, but it is still under review "
@@ -564,7 +592,8 @@ class MerchantAssistant:
         msgs.append({"role": "user", "content": (
             "FACTS:\n- " + "\n- ".join(facts.lines) +
             f"\n\nCHECKED DRAFT ANSWER (correct; keep its facts and amounts):\n{draft}"
-            f"\n\nMERCHANT'S MESSAGE: {question or 'hello'}")})
+            + (f"\n\nMERCHANT'S MESSAGE: {question}" if question else
+               "\n\nThe merchant has not written anything: write Paytm's first message to them."))})
         return msgs
 
     def _cases(self):
@@ -613,6 +642,31 @@ class MerchantAssistant:
         groups = self._groups(set().union(*TOPIC_PATTERNS.values()))
         for pattern, g in sorted(groups.items(), key=lambda kv: -kv[1]["amount"])[:4]:
             f.lines.append(self._group_line(f, pattern, g))
+
+    def _topic_proactive(self, f: Facts, m: dict) -> None:
+        f.lines.append("Nobody asked: Paytm is messaging the merchant first to say what it found in their settlements "
+                       "and what it has already fixed. Lead with the money back in their account.")
+        if not m["identified_paise"]:
+            f.draft_en.append("We checked all your settlements and everything is correct. Nothing was deducted in error.")
+            f.draft_hi.append("Humne aapke saare settlements check kiye, sab sahi hai. Koi galat katoti nahi mili.")
+            return
+        f.draft_en.append(f"Good news: we checked every settlement and put {inr(m['recovered_paise'])} back into your "
+                          f"account, out of {inr(m['identified_paise'])} that was deducted in error. You did not have "
+                          "to raise a complaint.")
+        f.draft_hi.append(f"Achhi khabar: humne aapke har settlement ko check kiya aur {inr(m['recovered_paise'])} aapke "
+                          f"account mein wapas daal diya, kul {inr(m['identified_paise'])} galat kata tha. Aapko koi "
+                          "complaint nahi karni padi.")
+        groups = self._groups(set().union(*TOPIC_PATTERNS.values()))
+        fixed = sorted(((p, g) for p, g in groups.items() if g["recovered"]), key=lambda kv: -kv[1]["recovered"])
+        for i, (pattern, g) in enumerate(fixed[:2]):
+            f.lines.append(self._group_line(f, pattern, g))
+            en, hi = WHY[pattern]
+            f.draft_en.append(f"{('For example' if i == 0 else 'Also')}, {en}: {inr(g['recovered'])} returned.")
+            f.draft_hi.append(f"{('Jaise' if i == 0 else 'Aur')}, {hi}: {inr(g['recovered'])} wapas.")
+        if m["escalated"]:
+            f.lines.append(f"{m['escalated']} case(s) worth {f.money(m['escalated_paise'])} wait for the merchant's review.")
+            f.draft_en.append(f"{m['escalated']} case(s) need a quick look from you.")
+            f.draft_hi.append(f"{m['escalated']} case par aapki nazar chahiye.")
 
     def _topic_greet(self, f: Facts, m: dict) -> None:
         f.lines.append("The merchant is greeting or thanking; reply warmly in one short sentence and offer more help. "

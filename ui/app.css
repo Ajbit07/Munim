@@ -53,6 +53,17 @@ svg { display: block; }
 .offline { background: var(--red); color: #fff; text-align: center; padding: 10px 16px; font-weight: 650; }
 .offline code { background: rgba(255, 255, 255, 0.18); padding: 1px 6px; border-radius: 4px; }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
+.impact { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+@media (max-width: 760px) { .impact { grid-template-columns: 1fr; } }
+.impact-col { border-radius: var(--r); padding: 18px; }
+.impact-col h3 { margin: 0 0 6px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; }
+.impact-col p { margin: 0 0 10px; color: var(--muted); }
+.impact-col ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 14px; }
+.impact-big { font: 800 34px var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.impact-col.without { background: var(--red-soft); }
+.impact-col.without h3, .impact-col.without .impact-big { color: var(--red); }
+.impact-col.with { background: var(--green-soft); }
+.impact-col.with h3, .impact-col.with .impact-big { color: var(--green); }
 .review-confirm { flex: 1; background: var(--sky-soft); border-radius: var(--r-sm); padding: 12px; }
 .review-confirm p { margin: 0 0 8px; font-size: 14px; color: var(--navy); font-weight: 600; }
 .review-confirm input {

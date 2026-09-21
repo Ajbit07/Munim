@@ -12,7 +12,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -235,6 +235,56 @@ def chat(body: dict[str, Any]) -> dict[str, Any]:
         director().rt.events.append(Actor.SYSTEM, "merchant.chat", merchant_id=director().merchant_id,
                                     topics=result["topics"], source=result["source"], guarded=bool(result["note"]))
     return result
+
+
+@app.post("/api/chat/proactive")
+def chat_proactive(body: dict[str, Any]) -> dict[str, Any]:
+    d = director()
+    if d.merchant_id not in d.rt.connected:
+        raise HTTPException(409, "the audit has not run yet")
+    return assistant().proactive(str(body.get("language", "hinglish")))
+
+
+@app.post("/api/chat/listen")
+async def chat_listen(request: Request):
+    from fastapi.responses import Response
+
+    audio = await request.body()
+    if len(audio) > 5_000_000:
+        raise HTTPException(413, "voice note too long")
+    heard = assistant().transcribe(audio, request.headers.get("content-type", "audio/webm"))
+    if heard is None:
+        return Response(status_code=204)  # no Sarvam key: the page falls back to the browser's recogniser
+    return heard
+
+
+@app.get("/api/impact")
+def impact() -> dict[str, Any]:
+    """Before and after, from computed figures only."""
+    with _lock:
+        d = director()
+        rt, mid = d.rt, d.merchant_id
+        if mid not in rt.connected:
+            raise HTTPException(409, "the audit has not run yet")
+        m = rt.metrics(mid)
+        view = rt.view(mid)
+        through = rt.observed_through()
+        late = late_settlements(rt, mid)
+        return {
+            "merchant": rt.dataset.merchant(mid).legal_name,
+            "lines_checked": sum(1 for line in view.settlement_lines
+                                 if view.batches_by_id[line.batch_id].settlement_date <= through),
+            "batches_checked": sum(1 for b in view.settlement_batches if b.settlement_date <= through),
+            "months": m["months_affected"],
+            "identified_paise": m["identified_paise"], "recovered_paise": m["recovered_paise"],
+            "in_progress_paise": m["in_progress_paise"], "escalated": m["escalated"],
+            "escalated_paise": m["escalated_paise"], "cases": m["proven_cases"] + m["escalated"],
+            "future_leakage_prevented_paise": m["future_leakage_prevented_paise"],
+            "projected_leakage_paise": m["projected_leakage_paise"],
+            "late_payments": late["payments"], "late_paise": late["held_up_paise"],
+            "complaints_raised": m["open_complaints"],
+            "false_claims": d.redteam["false_claims"] if d.redteam else None,
+        }
 
 
 @app.post("/api/chat/speak")

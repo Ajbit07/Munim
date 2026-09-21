@@ -70,6 +70,13 @@ python serve.py
 
 Then open http://localhost:8000 and press **Run next step**, or **Play the story**.
 
+Before going on stage, one command checks everything the demo needs, warms the
+local model, runs the whole story once and asks the chat three questions:
+
+```bash
+python rehearse.py
+```
+
 Headless, the same twelve steps in the terminal (about 12 seconds):
 
 ```bash
@@ -82,7 +89,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (187, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (191, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -117,8 +124,16 @@ demo runs with every non-localhost connection blocked.
 ### Merchant chat
 
 Press **Merchant chat ↗** in the command center (or open http://localhost:8000/chat)
-for a separate window styled as the Paytm Business app. The merchant types in any
-language; the assistant answers from that merchant's own proven records.
+for a separate window styled as the Paytm Business app. Paytm speaks first: the
+window opens with a message the merchant never asked for, saying how much is
+already back in their account and what was fixed. The merchant can then type or
+speak (mic button) in any language; the assistant answers from that merchant's
+own proven records.
+
+The command center's **Impact** tab shows the same merchant with and without the
+teammate: money lost, problems they would have had to find, lines to check by
+hand, and future charges, against money returned, complaints raised (zero) and
+causes fixed. Every figure is computed from the audit.
 
 | Job | With `SARVAM_API_KEY` | Without it (offline) |
 |---|---|---|
@@ -126,6 +141,7 @@ language; the assistant answers from that merchant's own proven records.
 | Write the answer | Sarvam writes it conversationally from the facts, in the merchant's language | the local model writes it the same way (about 6–11 s); `MFP_LOCAL_WRITES=0` shows the checked answer instantly instead |
 | Other languages | Sarvam | the local model translates the checked answer |
 | Voice (Listen) | Sarvam text-to-speech | the browser's own voice |
+| Voice (mic) | Sarvam speech-to-text (Hindi, Hinglish and 10 more) | the browser's speech recognition, where available |
 
 No model decides anything. Facts and a checked answer are computed from the
 runtime, and the model writes the reply from them. Guards reject a reply that:
@@ -235,5 +251,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             187 tests incl. firewall canaries and an offline rehearsal
+tests/             191 tests incl. firewall canaries and an offline rehearsal
 ```

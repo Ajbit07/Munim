@@ -16,7 +16,9 @@ python generate.py --seed 42 --no-leakage
 python serve.py
 ```
 
-Open http://localhost:8000. Nothing needs the network: `tests/test_new_capabilities.py::test_the_demo_rehearses_with_no_network`
+Run `python rehearse.py` first: it checks the data, runs the full story once,
+warms the local model and asks the chat three questions, then prints READY FOR
+STAGE or what is broken. Then open http://localhost:8000. Nothing needs the network: `tests/test_new_capabilities.py::test_the_demo_rehearses_with_no_network`
 runs all twelve steps with every non-localhost connection blocked. Rehearse once with Wi-Fi off anyway.
 If the server stops mid-demo, the page shows a banner and reconnects on its own.
 
@@ -43,7 +45,12 @@ Press **Run next step** for each beat (or **Play the story** to auto-advance).
 
 Optional beats if time allows:
 
-- **Merchant chat ↗** (after step 8): a separate phone-style window. Ask
+- **Impact tab** (after step 8): with and without the teammate, side by side,
+  every figure computed. This is the one-screen summary for the pitch.
+- **Merchant chat ↗** (after step 8): a separate phone-style window. It opens
+  with Paytm's own message, badged "Paytm found this for you": the money
+  already returned, two examples, and what needs the merchant. Tap the mic and
+  speak a question, or type. Ask
   "Soundbox rental kyun kata?" and it answers instantly from the device record
   and the rental case, written by the local model (about 6–11 seconds). Ask
   "मेरा साउंडबॉक्स का किराया क्यों कटा?" and it replies in Hindi with the return

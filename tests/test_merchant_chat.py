@@ -250,3 +250,74 @@ def test_chat_api_answers_from_the_demo_runtime(loop_datasets, monkeypatch):
     assert client.post("/api/chat/speak", json={"text": "namaste"}).status_code == 204
     server._state.clear()
     server._assistants.clear()
+
+
+# -- Paytm speaks first, voice, impact ---------------------------------------------------------------
+
+
+def test_paytm_messages_first_leading_with_money_returned(rt):
+    m = rt.metrics(HERO)
+    r = MerchantAssistant(rt, HERO, chain()).proactive("hinglish")
+    assert r["proactive"] and r["source"] == "template" and r["understood_by"] == "paytm"
+    first_sentence = r["reply"].split(". ")[0]
+    assert inr(m["recovered_paise"]) in first_sentence and "wapas" in first_sentence
+    assert "complaint" in r["reply"]
+
+
+def test_saying_everything_is_settled_while_money_is_pending_is_rejected(rt):
+    m = rt.metrics(HERO)
+    assert m["escalated"] > 0
+    local = FakeLocal(f"{inr(m['recovered_paise'])} wapas aa gaya, ab sab set ho gaya!")
+    r = MerchantAssistant(rt, HERO, chain(local=local)).proactive("hinglish")
+    assert r["source"] == "template" and "everything is settled" in r["note"]
+
+
+def test_voice_notes_are_sent_to_sarvam_as_multipart(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"transcript": "soundbox ka rental kyun kata", "language_code": "hi-IN"}).encode()
+
+    def fake_urlopen(request, timeout):
+        captured["url"], captured["headers"], captured["body"] = request.full_url, dict(request.headers), request.data
+        return Response()
+
+    monkeypatch.setattr(backends_module.urllib.request, "urlopen", fake_urlopen)
+    out = SarvamClient(api_key="sk_test").transcribe(b"OggS-audio", "audio/webm;codecs=opus")
+    assert out == {"transcript": "soundbox ka rental kyun kata", "language_code": "hi-IN"}
+    assert captured["url"] == "https://api.sarvam.ai/speech-to-text"
+    assert captured["headers"]["Content-type"].startswith("multipart/form-data; boundary=")
+    assert b'name="file"; filename="speech.webm"' in captured["body"] and b"OggS-audio" in captured["body"]
+    assert b'name="model"' in captured["body"]
+
+
+def test_voice_and_impact_endpoints(loop_datasets, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from mfp.demo import server
+    from mfp.demo.director import DemoDirector
+
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+    monkeypatch.setenv("MFP_OLLAMA_URL", "http://127.0.0.1:9")
+    server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
+    server._assistants.clear()
+    client = TestClient(server.app)
+    assert client.get("/api/impact").status_code == 409
+    assert client.post("/api/chat/proactive", json={}).status_code == 409
+    for _ in range(3):
+        client.post("/api/demo/next")
+    impact = client.get("/api/impact").json()
+    metrics = client.get("/api/state").json()["metrics"]
+    assert impact["identified_paise"] == metrics["identified_paise"] and impact["complaints_raised"] == 0
+    assert impact["lines_checked"] > 0 and impact["cases"] == metrics["proven_cases"] + metrics["escalated"]
+    assert client.post("/api/chat/proactive", json={"language": "en-IN"}).json()["proactive"] is True
+    assert client.post("/api/chat/listen", content=b"audio", headers={"Content-Type": "audio/webm"}).status_code == 204
+    server._state.clear()
+    server._assistants.clear()

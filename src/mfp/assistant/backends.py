@@ -68,6 +68,26 @@ class SarvamClient:
                                        "model": "mayura:v1", "numerals_format": "international"})
         return out["translated_text"]
 
+    def transcribe(self, audio: bytes, content_type: str = "audio/webm", language: str = "unknown") -> dict:
+        """Speech to text (POST /speech-to-text, multipart). Returns {"transcript", "language_code"}."""
+        if not self.api_key:
+            raise BackendError("SARVAM_API_KEY is not set")
+        boundary = "mfp" + base64.b16encode(os.urandom(8)).decode().lower()
+        extension = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mp4": "m4a"}.get(
+            content_type.split(";")[0], "webm")
+        fields = {"model": os.environ.get("MFP_SARVAM_STT_MODEL", "saaras:v3"), "language_code": language,
+                  "mode": "codemix"}
+        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+                 for k, v in fields.items()]
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="speech.{extension}"'
+                     f'\r\nContent-Type: {content_type.split(";")[0]}\r\n\r\n'.encode() + audio + b"\r\n")
+        body = b"".join(parts) + f"--{boundary}--\r\n".encode()
+        request = urllib.request.Request(self.BASE + "/speech-to-text", data=body, headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}", "api-subscription-key": self.api_key})
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            out = json.loads(response.read())
+        return {"transcript": out.get("transcript", ""), "language_code": out.get("language_code")}
+
     def speak(self, text: str, language: str) -> bytes:
         out = self.post("/text-to-speech", {"text": text[:1500], "language_code": language,
                                             "model": self.tts_model, "speaker": self.speaker,

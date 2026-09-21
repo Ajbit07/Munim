@@ -20,6 +20,7 @@ const ENGINE_LABEL = (s) => s.startsWith("sarvam") ? "Sarvam AI" : s.startsWith(
 
 const history = [];
 let busy = false;
+let sarvamVoice = false;
 
 function sourceLabel(r) {
   if (r.source === "safety") return "Safety notice";
@@ -119,17 +120,123 @@ async function send(text) {
   }
 }
 
+// -- voice input: Sarvam speech-to-text when configured, else the browser's recogniser ------------
+
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recorder = null;
+let recognizer = null;
+
+function micState(state) {
+  const mic = $("mic");
+  mic.classList.toggle("listening", state === "listening");
+  $("input").placeholder = state === "listening" ? "Sun raha hoon… bolkar mic dabaiye" : "Likhiye ya bol kar poochiye… (any language)";
+}
+
+async function startSarvamRecording() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    micState("idle");
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    recorder = null;
+    $("input").placeholder = "Aapki awaaz samajh raha hoon…";
+    try {
+      const res = await fetch("/api/chat/listen", { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+      if (res.status === 200) {
+        const heard = await res.json();
+        if (heard.text) { send(heard.text); return; }
+      }
+      showBanner("Awaaz samajh nahi aayi. Dobara boliye ya likhiye.");
+    } catch (_) {
+      showBanner("Can't reach the Settlement Teammate server. Is python serve.py running?");
+    } finally {
+      micState("idle");
+    }
+  };
+  recorder.start();
+  micState("listening");
+}
+
+function startBrowserRecognition() {
+  recognizer = new Recognition();
+  recognizer.lang = { hinglish: "hi-IN", auto: "hi-IN" }[$("language").value] || $("language").value;
+  recognizer.interimResults = true;
+  recognizer.onresult = (e) => {
+    const text = [...e.results].map((r) => r[0].transcript).join(" ");
+    $("input").value = text;
+    if (e.results[e.results.length - 1].isFinal) { recognizer.stop(); send(text); }
+  };
+  recognizer.onerror = () => showBanner("Voice input could not start here. Please type your question.");
+  recognizer.onend = () => { micState("idle"); recognizer = null; };
+  recognizer.start();
+  micState("listening");
+}
+
+$("mic").addEventListener("click", async () => {
+  if (busy) return;
+  if (recorder) { recorder.stop(); return; }
+  if (recognizer) { recognizer.stop(); return; }
+  try {
+    if (sarvamVoice && window.MediaRecorder && navigator.mediaDevices) await startSarvamRecording();
+    else if (Recognition) startBrowserRecognition();
+    else showBanner("Voice input needs a Sarvam key, or a browser with speech recognition. Please type instead.");
+  } catch (_) {
+    micState("idle");
+    showBanner("Microphone permission was not given. Please type your question.");
+  }
+});
+
+function showBanner(text) {
+  $("banner").textContent = text;
+  $("banner").hidden = false;
+  setTimeout(() => { $("banner").hidden = true; }, 6000);
+}
+
+// -- Paytm speaks first --------------------------------------------------------------------------
+
+async function paytmSpeaksFirst() {
+  const done = showTyping();
+  try {
+    const res = await fetch("/api/chat/proactive", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: $("language").value === "auto" ? "hinglish" : $("language").value }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const r = await res.json();
+    done();
+    const badge = document.createElement("div");
+    badge.className = "found-for-you";
+    badge.textContent = "Paytm found this for you";
+    $("thread").appendChild(badge);
+    addBot(r.reply, r);
+    setChips(r.suggestions);
+    history.push({ role: "assistant", content: r.reply });
+  } catch (_) {
+    done();
+  }
+}
+
 async function boot() {
   try {
     const s = await (await fetch("/api/chat/status")).json();
+    sarvamVoice = s.sarvam_configured;
+    if (!sarvamVoice && !Recognition) {
+      $("mic").classList.add("unavailable");
+      $("mic").title = "Voice input needs a Sarvam key (or a browser with speech recognition)";
+    }
     $("engine").textContent = ENGINE_LABEL(s.active) + (s.sarvam_configured ? "" : " · Sarvam key not set");
     $("language").innerHTML = `<option value="auto">Auto</option>` +
       s.languages.map((l) => `<option value="${esc(l.code)}">${esc(l.label)}</option>`).join("");
     const first = s.merchant.split(/\s+/)[0];
-    addBot(s.connected
-      ? `Namaste ${s.merchant}! Main aapka Paytm settlement assistant hoon. Paytm aapke har settlement ko check karta hai aur galti mile to khud theek karta hai. Aap mujhse kuch bhi poochiye, kisi bhi bhasha mein.`
-      : `Namaste ${first} ji! Hum abhi aapke settlements check kar rahe hain. Command center mein story shuru kijiye, phir yahan poochiye.`);
-    setChips(s.suggestions);
+    if (s.connected) {
+      await paytmSpeaksFirst();
+    } else {
+      addBot(`Namaste ${first} ji! Hum abhi aapke settlements check kar rahe hain. Command center mein story shuru kijiye, phir yahan poochiye.`);
+      setChips(s.suggestions);
+    }
   } catch (err) {
     $("engine").textContent = "Offline";
     $("banner").textContent = "Can't reach the Settlement Teammate server. Is python serve.py running?";

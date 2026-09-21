@@ -280,6 +280,40 @@ async function renderActiveTab() {
 const SHIELD = `<svg viewBox="0 0 32 32" width="20" height="20"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round"/></svg>`;
 
 const TABS = {
+  async impact() {
+    const res = await fetch("/api/impact");
+    if (res.status === 409) return `<p class="empty">Run the audit first (step 3). The comparison is computed from its results.</p>`;
+    const d = await res.json();
+    const n = (x) => Number(x).toLocaleString("en-IN");
+    const leakBeyond = d.projected_leakage_paise;
+    return `<p class="note">Same merchant, same twelve months. Every figure below is computed from the audit; nothing is estimated by hand.</p>
+      <div class="impact">
+        <section class="impact-col without">
+          <h3>Without the teammate</h3>
+          <div class="impact-big">${rupees(d.identified_paise)}</div>
+          <p>deducted in error and never noticed</p>
+          <ul>
+            <li>The merchant would have to spot <b>${n(d.cases)} separate problems</b> across ${n(d.months)} months of statements, and raise a complaint for each.</li>
+            <li><b>${n(d.lines_checked)}</b> settlement lines to check by hand, across ${n(d.batches_checked)} settlement batches.</li>
+            <li>The causes keep charging: about <b>${rupees(leakBeyond)}</b> more in the coming months.</li>
+            <li>${n(d.late_payments)} late payments (${rupees(d.late_paise)}) go unreported.</li>
+          </ul>
+        </section>
+        <section class="impact-col with">
+          <h3>With the teammate</h3>
+          <div class="impact-big">${rupees(d.recovered_paise)}</div>
+          <p>already back in the merchant's account</p>
+          <ul>
+            <li><b>${n(d.complaints_raised)}</b> complaints raised by the merchant. Paytm found and corrected its own errors.</li>
+            <li>Every line checked automatically, each correction backed by a recomputed proof.</li>
+            <li>Causes fixed at the source: <b>${rupees(d.future_leakage_prevented_paise)}</b> of future wrong charges stopped.</li>
+            <li>${n(d.escalated)} unclear case(s) (${rupees(d.escalated_paise)}) held for a person instead of guessed.</li>
+            ${d.false_claims === null ? "" : `<li><b>${n(d.false_claims)}</b> false corrections in the red-team test.</li>`}
+          </ul>
+        </section>
+      </div>`;
+  },
+
   async cases() {
     const cases = await (await fetch("/api/cases")).json();
     if (!cases.length) return `<p class="empty">No cases yet. The Monitor agent opens them itself during the audit.</p>`;
