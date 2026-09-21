@@ -364,6 +364,39 @@ def chat_proactive(body: dict[str, Any]) -> dict[str, Any]:
     return assistant().proactive(str(body.get("language", "hinglish")))
 
 
+@app.post("/api/chat/decide")
+def chat_decide(body: dict[str, Any]) -> dict[str, Any]:
+    action = str(body.get("action", ""))
+    if action not in ("file", "dismiss"):
+        raise HTTPException(400, "action must be file or dismiss")
+    try:
+        return assistant().decide(str(body.get("case_id", "")), action, str(body.get("language", "hinglish")))
+    except KeyError:
+        raise HTTPException(404, "No such case for this merchant") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.get("/api/tickets")
+def tickets() -> list[dict[str, Any]]:
+    with _lock:
+        d = director()
+        return [t.summary() for t in d.rt.tickets.for_merchant(d.merchant_id)]
+
+
+@app.post("/api/tickets/{ticket_id}/resolve")
+def ticket_resolve(ticket_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    with _lock:
+        d = director()
+        try:
+            return d.rt.tickets.resolve(ticket_id, body.get("resolved_by") or "Merchant success desk",
+                                        body.get("resolution") or "Checked with the merchant").summary()
+        except KeyError:
+            raise HTTPException(404, f"No ticket {ticket_id}") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+
 @app.post("/api/chat/listen")
 async def chat_listen(request: Request):
     from fastapi.responses import Response

@@ -97,6 +97,8 @@ received", never "missing".
 | Workflow | `LocalWorkflowEngine` | `N8nWorkflowEngine` → `workflow/n8n/claim_lifecycle.json` | Step runs locally; `workflow.fallback` event |
 | Memory | `LocalMemoryStore` (SQLite) | `CogneeMemoryStore` (narratives to Cognee; counterparty statistics stay local) | Local store; error recorded |
 | Notifier | `TemplatedNotifier` (Hinglish) | `SarvamNotifier` (translate, optional speech) | Template; source marked |
+| Merchant decisions (`assistant/chat.py` → `Runtime.review`) | the merchant files or dismisses a review case from the chat; recorded as `Actor.HUMAN` with the merchant's name | — | — |
+| Merchant-reported issues (`cases/tickets.py`) | a report no case covers opens a ticket for Paytm's team, with the merchant's words and what the records showed | — | — |
 | Merchant chat (`assistant/`) | checked answer from runtime facts | `SarvamChat` (chat, translate, speech); `OllamaChat` (gemma3:4b: classify, translate) | Checked answer; the rejected reply's reason is shown |
 
 The case state machine stays authoritative in Python with every adapter.

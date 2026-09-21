@@ -27,6 +27,7 @@ from mfp.agents.investigation import InvestigationAgent
 from mfp.agents.monitor import MonitorAgent
 from mfp.agents.reasoner import DeterministicReasoner, Reasoner
 from mfp.cases.state_machine import IN_FLIGHT, Case, CaseRepository, CaseStateMachine
+from mfp.cases.tickets import TicketDesk
 from mfp.core.clock import VirtualClock
 from mfp.core.enums import Actor, CaseState, Instrument, MerchantClass
 from mfp.core.events import EventLog
@@ -85,6 +86,7 @@ class Runtime:
 
         self.desk = MockClaimsDesk(seed)
         self.adjustments = self.desk.adjustments   # reversal credits as they reach merchants' accounts
+        self.tickets = TicketDesk(self.clock, self.events)
         local = LocalWorkflowEngine(self.desk, self.clock, self.events)
         choice = (workflow or os.environ.get("MFP_WORKFLOW", "local")).lower()
         self.workflow = N8nWorkflowEngine(local) if choice == "n8n" else local

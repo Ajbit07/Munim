@@ -93,7 +93,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (196, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (203, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -133,6 +133,19 @@ window opens with a message the merchant never asked for, saying how much is
 already back in their account and what was fixed. The merchant can then type or
 speak (mic button) in any language; the assistant answers from that merchant's
 own proven records.
+
+The merchant can also act from the chat, which is their only way to talk to the
+teammate:
+
+- **Decide review cases.** Every case the teammate would not decide alone comes
+  to the merchant as a card (what happened, the amount, why it needs them) with
+  **Haan, correction file karo** or **Nahi, yeh charge sahi hai**. The decision is
+  confirmed, recorded with the merchant's name, and carried out by the agents.
+- **Report a problem.** "Maine soundbox wapas kar diya, phir bhi rental kat raha
+  hai" is checked against the records first: if it is already caught, the chat
+  shows its status; if the records do not show it, a ticket goes to Paytm's team
+  with the merchant's words, and the chat says so instead of promising money.
+  Tickets appear at the top of **Needs review** in the ops console.
 
 The command center's **Impact** tab shows the same merchant with and without the
 teammate: money lost, problems they would have had to find, lines to check by
@@ -255,5 +268,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             196 tests incl. firewall canaries and an offline rehearsal
+tests/             203 tests incl. firewall canaries and an offline rehearsal
 ```

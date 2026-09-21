@@ -73,8 +73,12 @@ Optional beats if time allows:
   every figure computed. This is the one-screen summary for the pitch.
 - **Merchant chat ↗** (after step 8): a separate phone-style window. It opens
   with Paytm's own message, badged "Paytm found this for you": the money
-  already returned, two examples, and what needs the merchant. Tap the mic and
-  speak a question, or type. Ask
+  already returned, two examples, and what needs the merchant, followed by a card
+  for each case that needs them. Press **Haan, correction file karo** on one and
+  confirm: it is filed on the merchant's authority and the ops console updates.
+  Type "maine soundbox wapas kar diya phir bhi rental kat raha hai" on a merchant
+  whose records show no rental problem: a ticket goes to the team and appears in
+  **Needs review**. Tap the mic and speak a question, or type. Ask
   "Soundbox rental kyun kata?" and it answers instantly from the device record
   and the rental case, written by the local model (about 6–11 seconds). Ask
   "मेरा साउंडबॉक्स का किराया क्यों कटा?" and it replies in Hindi with the return

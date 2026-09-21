@@ -146,6 +146,29 @@ body {
 }
 .chips button:hover { background: var(--sky-soft); }
 
+.decisions { display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
+.decision {
+  background: var(--card); border-radius: 14px; padding: 12px 14px; border-left: 4px solid #5B4BC4;
+  box-shadow: 0 1px 2px rgba(0, 46, 110, 0.08);
+}
+.decision header { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; color: var(--navy); }
+.decision header span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.decision-amount { font-size: 20px; font-weight: 750; color: var(--ink); margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+.decision p { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.decision-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.decision-buttons button {
+  border: 0; border-radius: 999px; padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.decision-buttons .file { background: var(--navy); color: #fff; }
+.decision-buttons .dismiss, .decision-buttons .cancel { background: var(--sky-soft); color: var(--navy); }
+.confirm-q { font-size: 13px; font-weight: 600; color: var(--navy); flex-basis: 100%; }
+.decision.decided { border-left-color: var(--green); opacity: 0.85; }
+.done-tag { color: var(--green); font-weight: 700; font-size: 13px; }
+.ticket-card {
+  align-self: flex-start; max-width: 86%; background: var(--amber-soft); color: #7A4B00; border-radius: 14px;
+  padding: 10px 13px; font-size: 13px; display: grid; gap: 4px;
+}
+.ticket-status { font-weight: 600; }
 .composer { display: flex; gap: 8px; padding: 8px 12px 6px; background: var(--card); border-top: 1px solid var(--line); }
 .composer input {
   flex: 1;

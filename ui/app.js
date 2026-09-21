@@ -43,7 +43,7 @@ const INSTRUMENTS = {
 };
 const AGENTS = {
   MONITOR_AGENT: "Monitor agent", INVESTIGATION_AGENT: "Investigation agent", PROOF_ENGINE: "Proof engine",
-  FOLLOWUP_AGENT: "Follow-up agent", WORKFLOW_ENGINE: "Claim workflow", SYSTEM: "System", HUMAN: "You",
+  FOLLOWUP_AGENT: "Follow-up agent", WORKFLOW_ENGINE: "Claim workflow", SYSTEM: "System", HUMAN: "Person",
 };
 const INITIALS = { MONITOR_AGENT: "MO", INVESTIGATION_AGENT: "IN", PROOF_ENGINE: "PR", FOLLOWUP_AGENT: "FU", WORKFLOW_ENGINE: "WF", SYSTEM: "SY", HUMAN: "YOU" };
 const STATE_LABELS = {
@@ -89,6 +89,8 @@ function describe(e) {
     case "workflow.response": return [`Settlement ops replied on ${p.claim_id}: ${p.status.replaceAll("_", " ").toLowerCase()}${p.reason_code ? " (" + p.reason_code + ")" : ""}.`];
     case "workflow.withdraw": return [`Correction ${p.claim_id} withdrawn: ${p.reason}.`];
     case "settlement.delay.detected": return [`${p.payments} payments settled late (worst ${p.worst_days_late} banking days past the agreed date). Reported to settlement ops; no money is owed for a delay.`, "alert"];
+    case "ticket.opened": return [`Merchant reported via chat: “${p.statement}”. Records showed nothing yet, so ticket ${p.ticket_id} went to the team.`, "alert"];
+    case "ticket.resolved": return [`Ticket ${p.ticket_id} resolved by ${p.resolved_by}.`];
     case "workflow.n8n.step": return [`n8n executed the ${p.action.replaceAll("_", "-")} step for ${p.claim_id}.`];
     case "pattern.recurred": return [`${c}the fix confirmed earlier did not hold: ${pattern(p.pattern).toLowerCase()} is back. Correction re-requested.`, "alert"];
     case "workflow.fallback": return [`n8n unreachable; the claim continues on the local workflow.`, "alert"];
@@ -410,6 +412,14 @@ async function renderActiveTab() {
     row.addEventListener("click", () => openCase(row.dataset.case));
     row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === row) openCase(row.dataset.case); });
   });
+  el.querySelectorAll("[data-resolve]").forEach((btn) => btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    await fetch(`/api/tickets/${btn.dataset.resolve}/resolve`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved_by: "Merchant success desk", resolution: "Checked with the merchant and the device team" }),
+    });
+    await refreshAll();
+  }));
   el.querySelectorAll("[data-run]").forEach((btn) => btn.addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "Running…";
@@ -471,9 +481,21 @@ const TABS = {
   },
 
   async queue() {
-    const items = await (await fetch("/api/human-queue")).json();
-    if (!items.length) return `<p class="empty">Nothing needs your review. Cases the teammate cannot prove land here instead of being filed.</p>`;
-    return `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. Filing one records your name as the authority; the teammate then follows it through.</p>` +
+    const [items, tickets] = await Promise.all([
+      fetch("/api/human-queue").then((r) => r.json()), fetch("/api/tickets").then((r) => r.json())]);
+    const ticketHtml = tickets.map((t) => `<div class="card ticket">
+      <div class="card-row"><h3>Reported by the merchant via chat · ${esc(t.ticket_id)}</h3>
+        <span class="pill ${t.status === "OPEN" ? "NEEDS_HUMAN" : "RECOVERED"}">${t.status === "OPEN" ? "Open ticket" : "Resolved"}</span></div>
+      <dl class="kv">
+        <dt>Merchant said</dt><dd>“${esc(t.statement)}”</dd>
+        <dt>Records showed</dt><dd>${esc(t.records_showed)}</dd>
+        ${t.resolution ? `<dt>Resolution</dt><dd>${esc(t.resolution)} (${esc(t.resolved_by)})</dd>` : ""}
+      </dl>
+      ${t.status === "OPEN" ? `<div class="actions"><button class="btn btn-solid" data-resolve="${esc(t.ticket_id)}">Mark resolved</button></div>` : ""}
+    </div>`).join("");
+    if (!items.length && !tickets.length) return `<p class="empty">Nothing needs your review. Cases the teammate cannot prove land here instead of being filed.</p>`;
+    if (!items.length) return ticketHtml;
+    return ticketHtml + `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. Filing one records your name as the authority; the teammate then follows it through.</p>` +
       items.map((c) => `<div class="card" data-case="${c.case_id}" tabindex="0" style="cursor:pointer">
       <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">Not filed</span></div>
       <dl class="kv">

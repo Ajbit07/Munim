@@ -18,12 +18,14 @@ const PATTERNS = {
 const SPEECH_LANG = { hinglish: "hi-IN", "en-IN": "en-IN" };
 const ENGINE_LABEL = (s) => s.startsWith("sarvam") ? "Sarvam AI" : s.startsWith("local:") ? `On-device AI · ${s.slice(6)}` : "Checked answers";
 
+const rupee = (paise) => "₹" + (paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const history = [];
 let busy = false;
 let sarvamVoice = false;
 
 function sourceLabel(r) {
   if (r.source === "safety") return "Safety notice";
+  if (r.source === "paytm") return "Paytm";
   if (r.source === "template") return "Checked answer";
   return ENGINE_LABEL(r.source);
 }
@@ -52,7 +54,70 @@ function addBot(text, r = null) {
     (r?.note ? `<div class="note">${esc(r.note)}</div>` : "");
   el.querySelector(".speak")?.addEventListener("click", () => speak(text, r.language));
   $("thread").appendChild(el);
+  if (r?.ticket) addTicket(r.ticket);
+  if (r?.actions?.length) addDecisionCards(r.actions, r.language);
   scrollDown();
+}
+
+// -- the merchant decides review cases right here ------------------------------------------------
+
+function addDecisionCards(cards, language) {
+  const wrap = document.createElement("div");
+  wrap.className = "decisions";
+  wrap.innerHTML = cards.map((c) => `
+    <article class="decision" data-case="${esc(c.case_id)}">
+      <header><strong>${esc(c.title)}</strong><span>${esc(c.month)}</span></header>
+      <div class="decision-amount">${rupee(c.amount_paise)}</div>
+      <p>${esc(c.why)}</p>
+      <div class="decision-buttons">
+        ${c.options.map((o) => `<button type="button" class="${o.action}" data-action="${o.action}">${esc(o.label)}</button>`).join("")}
+      </div>
+    </article>`).join("");
+  wrap.querySelectorAll(".decision").forEach((card) => {
+    card.querySelectorAll("[data-action]").forEach((btn) => btn.addEventListener("click", () => confirmDecision(card, btn, language)));
+  });
+  $("thread").appendChild(wrap);
+}
+
+function confirmDecision(card, btn, language) {
+  const buttons = card.querySelector(".decision-buttons");
+  const original = buttons.innerHTML;
+  const filing = btn.dataset.action === "file";
+  buttons.innerHTML = `<span class="confirm-q">${filing ? "Pakka? Correction aapke naam se file hogi." : "Pakka? Yeh case band ho jayega, kuch file nahi hoga."}</span>
+    <button type="button" class="${btn.dataset.action}" data-yes>${filing ? "Haan, file karo" : "Haan, band karo"}</button>
+    <button type="button" class="cancel" data-no>Rehne do</button>`;
+  buttons.querySelector("[data-no]").addEventListener("click", () => {
+    buttons.innerHTML = original;
+    buttons.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => confirmDecision(card, b, language)));
+  });
+  buttons.querySelector("[data-yes]").addEventListener("click", async () => {
+    buttons.innerHTML = `<span class="confirm-q">Record kar rahe hain…</span>`;
+    try {
+      const res = await fetch("/api/chat/decide", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ case_id: card.dataset.case, action: btn.dataset.action, language }),
+      });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r.detail || "Could not record the decision");
+      card.classList.add("decided");
+      buttons.innerHTML = `<span class="done-tag">${filing ? "✓ Correction filed" : "✓ Marked correct"}</span>`;
+      addMine(filing ? "Haan, correction file karo" : "Nahi, yeh charge sahi hai");
+      addBot(r.reply, { ...r, actions: [] });
+      history.push({ role: "assistant", content: r.reply });
+    } catch (err) {
+      buttons.innerHTML = original;
+      buttons.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => confirmDecision(card, b, language)));
+      showBanner(err.message);
+    }
+  });
+}
+
+function addTicket(t) {
+  const el = document.createElement("div");
+  el.className = "ticket-card";
+  el.innerHTML = `<strong>Ticket ${esc(t.ticket_id)}</strong> · sent to Paytm's settlement team
+    <div>${esc(t.records_showed)}</div><div class="ticket-status">Status: open. You will get the reply here.</div>`;
+  $("thread").appendChild(el);
 }
 
 function showTyping() {

@@ -121,6 +121,22 @@ WHY = {
         "free period mein bhi soundbox rental kata"),
 }
 
+SHORT_TITLE = {  # (English, Hinglish) card headings
+    "mdr_on_protected_instrument": ("Charge on a free payment", "Free payment par charge"),
+    "mdr_above_agreement": ("Card rate above your agreement", "Agreement se zyada card rate"),
+    "mdr_above_mcc_rate": ("Wrong business category rate", "Galat category ka rate"),
+    "mdr_above_turnover_cap": ("Debit charge above the RBI limit", "RBI limit se zyada debit charge"),
+    "unverified_interchange_passthrough": ("Wallet charge passed to you", "Wallet charge aap par dala gaya"),
+    "gst_on_exempt_settlement": ("GST on an exempt payment", "Chhoot wale payment par GST"),
+    "gst_above_standard_base": ("GST on the wrong amount", "Galat amount par GST"),
+    "tax_on_non_eco_flow": ("TCS/TDS deducted", "TCS/TDS kata"),
+    "refund_debited_twice": ("Refund taken twice", "Refund do baar kata"),
+    "refund_without_refund_event": ("Refund with no refund", "Bina refund ke katoti"),
+    "payment_missing_from_settlement": ("Payment missing", "Payment nahi aaya"),
+    "rental_after_return": ("Rental after return", "Wapsi ke baad rental"),
+    "rental_during_waiver": ("Rental in the free period", "Free period mein rental"),
+}
+
 TOPIC_PATTERNS = {
     "charges": {"mdr_on_protected_instrument", "mdr_above_agreement", "mdr_above_mcc_rate",
                 "mdr_above_turnover_cap", "unverified_interchange_passthrough"},
@@ -175,6 +191,38 @@ def detect_language(text: str) -> str:
             return code
     words = set(re.findall(r"[a-z]+", text.lower()))
     return "hinglish" if len(words & HINGLISH_WORDS) >= 1 else "en-IN"
+
+
+REPORT_WORDS = ("phir bhi", "fir bhi", "still", "galat", "wrong", "kat raha", "kat rahe", "kaat liya", "kaat liye",
+                "return kar", "wapas kar", "lauta", "nahi aaya", "nahi mila", "not received", "missing", "extra",
+                "zyada", "double", "problem", "complaint", "shikayat", "गलत", "फिर भी", "वापस कर", "नहीं आया")
+
+
+def is_report(question: str) -> bool:
+    """The merchant is telling us about a problem, not only asking."""
+    q = question.lower()
+    return any(w in q for w in REPORT_WORDS)
+
+
+def review_reason(case, hinglish: bool) -> str:
+    """Why this case needs the merchant, in words a shopkeeper can act on."""
+    reason = ((case.escalation or {}).get("reason") or "").lower()
+    if "assumed" in reason or "published rule" in reason or "no rule" in reason:
+        return ("Koi published rule nahi batata ki yeh charge aap par banta hai. Aapke agreement mein yeh charge nahi hai "
+                "to correction file karein; hai to 'Sahi hai' dabaiye." if hinglish else
+                "No published rule says whether you owe this charge. If your agreement does not include it, file the "
+                "correction; if it does, mark it correct.")
+    if "never arrived" in reason:
+        return ("Correction approve hua tha par paisa aapke account mein nahi aaya. File karein to hum dobara maangenge."
+                if hinglish else "The correction was approved but the money never reached you. File to ask again.")
+    if "no response" in reason or "unresponsive" in reason:
+        return ("Settlement team ne jawab nahi diya. File karein to hum dobara bhejenge." if hinglish else
+                "Settlement ops did not respond. File to send it again.")
+    if "rejection" in reason:
+        return ("Settlement team ne mana kiya aur hum khud jawab nahi de sakte. Aap chahein to dobara file karein."
+                if hinglish else "Settlement ops said no and we cannot answer it ourselves. You can file it again.")
+    return ("Hum ise khud prove nahi kar sake, isliye faisla aapka hai." if hinglish else
+            "We could not prove this ourselves, so the decision is yours.")
 
 
 SENSITIVE = ("otp", "pin", "password", "cvv", "upi pin", "bank account number", "card number")
@@ -272,8 +320,10 @@ def strip_preamble(text: str) -> str:
 
 
 RETURNED_WORDS = ("wapas", "return", "credited", "credit ho", "back in your", "mil gaya", "mil chuka", "refund ho",
-                  "recovered", "वापस", "जमा", "परत", "திரும்ப")
-PENDING_WORDS = ("review", "approve", "dismiss", "verify", "progress", "chal rahi", "pending", "समीक्षा", "प्रक्रिया")
+                  "recovered", "correct kiya", "correct ho", "theek kar diya", "reversed", "reverse ho", "refunded",
+                  "वापस", "जमा", "परत", "திரும்ப")
+PENDING_WORDS = ("review", "approve", "dismiss", "verify", "progress", "chal rahi", "pending", "aayega", "on its way",
+                 "will reach", "soon", "jaldi", "file kar", "filed", "समीक्षा", "प्रक्रिया")
 
 
 OVERCLAIM = re.compile(r"sab (set|theek|thik|sorted|done|clear)|everything (is|has been) (fixed|sorted|settled|done|resolved)"
@@ -339,6 +389,7 @@ def reply_problem(reply: str, draft: str, language: str) -> str | None:
 
 @dataclass
 class Facts:
+    ticket: dict[str, Any] | None = None                     # opened when a reported issue is not in the records
     lines: list[str] = field(default_factory=list)          # English, for the model
     draft_en: list[str] = field(default_factory=list)
     draft_hi: list[str] = field(default_factory=list)       # Hinglish
@@ -453,7 +504,60 @@ class MerchantAssistant:
                     note = f"{local.name} unavailable ({type(exc).__name__})"
             if source == "template":
                 text = draft
-        return self._out(text, language, source, topics, facts, started, note, understood_by)
+        out = self._out(text, language, source, topics, facts, started, note, understood_by)
+        if facts.ticket:
+            out["ticket"] = facts.ticket
+        if topics[0] in ("review", "proactive") or ("review" in topics):
+            out["actions"] = self.review_cards(language)
+        return out
+
+    # -- the merchant resolves things from the chat -------------------------------------------------
+
+    def review_cards(self, language: str = "hinglish") -> list[dict[str, Any]]:
+        """Every case waiting for this merchant, as a card with the two decisions they can make."""
+        hinglish = language in ("hinglish", "hi-IN", "auto")
+        with self.lock:
+            waiting = self.rt.cases.in_state(CaseState.ESCALATED, merchant_id=self.merchant_id)
+            cards = []
+            for c in sorted(waiting, key=lambda c: -(c.proof.discrepancy_paise if c.proof else 0)):
+                amount = c.proof.discrepancy_paise if c.proof else (c.escalation or {}).get("disputed_paise", 0)
+                cards.append({
+                    "case_id": c.case_id, "month": c.month, "amount_paise": amount, "pattern": c.pattern,
+                    "title": SHORT_TITLE.get(c.pattern, (c.pattern, c.pattern))[1 if hinglish else 0],
+                    "why": review_reason(c, hinglish),
+                    "options": [
+                        {"action": "file", "label": "Haan, correction file karo" if hinglish else "Yes, file the correction"},
+                        {"action": "dismiss", "label": "Nahi, yeh charge sahi hai" if hinglish else "No, this charge is correct"},
+                    ],
+                })
+        return cards
+
+    def decide(self, case_id: str, action: str, language: str = "hinglish") -> dict[str, Any]:
+        """The merchant's decision on a review case, recorded with their name, then carried out."""
+        hinglish = language in ("hinglish", "hi-IN", "auto")
+        with self.lock:
+            case = self.rt.cases.get(case_id)
+            if case.merchant_id != self.merchant_id:
+                raise KeyError(case_id)
+            merchant = self.rt.dataset.merchant(self.merchant_id).legal_name
+            self.rt.review(case_id, action, reviewer=f"{merchant} (merchant, via chat)",
+                           note="Confirmed by the merchant in the Paytm Business chat")
+            amount = case.claimed_paise or (case.proof.discrepancy_paise if case.proof else 0)
+            claim = self.rt.followup.claims.get(case.claim_id) if case.claim_id else None
+            state = str(case.state)
+        if action == "file":
+            ref = f" Reference {claim.reference}." if claim and claim.reference else ""
+            text = (f"Ho gaya. Aapki confirmation par {inr(amount)} ki correction file kar di.{ref} Paisa aapke "
+                    "account mein aate hi yahin bataayenge." if hinglish else
+                    f"Done. The correction for {inr(amount)} is filed on your confirmation.{ref} We will tell you here "
+                    "as soon as the money reaches your account.")
+        else:
+            text = ("Theek hai, humne yeh case band kar diya. Kuch file nahi hua." if hinglish else
+                    "Understood. We closed this case; nothing was filed.")
+        remaining = self.review_cards(language)
+        return {"reply": text, "language": language, "source": "paytm", "case_id": case_id, "state": state,
+                "claim_id": case.claim_id, "actions": remaining, "note": None, "cases": [], "topics": ["review"],
+                "suggestions": SUGGESTIONS["review"] if remaining else SUGGESTIONS["summary"]}
 
     def _vet(self, candidate: str, draft: str, language: str, known_paise: set[int], name: str,
              *, strict: bool, grounding: str = "", require_primary: bool = False,
@@ -615,6 +719,10 @@ class MerchantAssistant:
             f"{m['escalated']} case(s) worth {f.money(m['escalated_paise'])} wait for the merchant's review; "
             f"future wrong charges of {f.money(m['future_leakage_prevented_paise'])} were stopped by fixing the cause.")
 
+        if is_report(question) and topics[0] in TOPIC_PATTERNS and not self._groups(TOPIC_PATTERNS[topics[0]]):
+            self._open_ticket(f, topics[0], question)
+            return f
+
         case_match = re.search(r"case[-\s]?0*(\d+)", question, re.IGNORECASE)
         if case_match:
             self._case_facts(f, f"CASE-{int(case_match.group(1)):05d}")
@@ -643,6 +751,21 @@ class MerchantAssistant:
         for pattern, g in sorted(groups.items(), key=lambda kv: -kv[1]["amount"])[:4]:
             f.lines.append(self._group_line(f, pattern, g))
 
+    def _open_ticket(self, f: Facts, topic: str, question: str) -> None:
+        """The merchant reports something the records do not show: hand it to people, and say so."""
+        what = {"rental": "no device rental charged after a return or inside the free period",
+                "charges": "no payment charge above the correct rate", "tax": "no GST, TCS or TDS deducted in error",
+                "refund": "no refund debited twice", "missing": "every customer payment reached a settlement"}[topic]
+        ticket = self.rt.tickets.open(self.merchant_id, topic, question, f"Records checked: {what}.")
+        f.ticket = ticket.summary()
+        f.lines.append(f"The merchant reports a {topic} problem. Paytm checked their records and found {what}. "
+                       f"Ticket {ticket.ticket_id} was opened for Paytm's settlement team, who will reply in this chat. "
+                       "Nothing is promised until the team confirms.")
+        f.draft_en.append(f"I checked your records and could not find this yet: {what}. I have opened ticket "
+                          f"{ticket.ticket_id} for our settlement team with your message, and they will reply here.")
+        f.draft_hi.append(f"Maine aapke records check kiye, abhi yeh galti nahi dikhi. Aapka message ticket "
+                          f"{ticket.ticket_id} ke saath hamari settlement team ko bhej diya hai, woh yahin jawab denge.")
+
     def _topic_proactive(self, f: Facts, m: dict) -> None:
         f.lines.append("Nobody asked: Paytm is messaging the merchant first to say what it found in their settlements "
                        "and what it has already fixed. Lead with the money back in their account.")
@@ -650,12 +773,26 @@ class MerchantAssistant:
             f.draft_en.append("We checked all your settlements and everything is correct. Nothing was deducted in error.")
             f.draft_hi.append("Humne aapke saare settlements check kiye, sab sahi hai. Koi galat katoti nahi mili.")
             return
-        f.draft_en.append(f"Good news: we checked every settlement and put {inr(m['recovered_paise'])} back into your "
-                          f"account, out of {inr(m['identified_paise'])} that was deducted in error. You did not have "
-                          "to raise a complaint.")
-        f.draft_hi.append(f"Achhi khabar: humne aapke har settlement ko check kiya aur {inr(m['recovered_paise'])} aapke "
-                          f"account mein wapas daal diya, kul {inr(m['identified_paise'])} galat kata tha. Aapko koi "
-                          "complaint nahi karni padi.")
+        approved = sum(c.approved_paise for c in self.rt.cases.in_state(CaseState.AWAITING_CREDIT,
+                                                                           merchant_id=self.merchant_id))
+        if approved:
+            f.lines.append(f"{f.money(approved)} is approved by settlement ops and on its way; it is not in the "
+                           "merchant's account yet.")
+        if m["recovered_paise"]:
+            f.draft_en.append(f"Good news: we checked every settlement and put {inr(m['recovered_paise'])} back into your "
+                              f"account, out of {inr(m['identified_paise'])} that was deducted in error. You did not have "
+                              "to raise a complaint.")
+            f.draft_hi.append(f"Achhi khabar: humne aapke har settlement ko check kiya aur {inr(m['recovered_paise'])} "
+                              f"aapke account mein wapas daal diya, kul {inr(m['identified_paise'])} galat kata tha. Aapko "
+                              "koi complaint nahi karni padi.")
+        else:
+            f.draft_en.append(f"We checked every settlement and found {inr(m['identified_paise'])} deducted in error. "
+                              "We have already filed the corrections; you did not have to raise a complaint.")
+            f.draft_hi.append(f"Humne aapke har settlement ko check kiya aur {inr(m['identified_paise'])} galat kata hua "
+                              "paaya. Correction hum file kar chuke hain; aapko koi complaint nahi karni padi.")
+        if approved:
+            f.draft_en.append(f"{inr(approved)} is already approved and will reach your account soon.")
+            f.draft_hi.append(f"{inr(approved)} approve ho chuka hai aur jaldi aapke account mein aayega.")
         groups = self._groups(set().union(*TOPIC_PATTERNS.values()))
         fixed = sorted(((p, g) for p, g in groups.items() if g["recovered"]), key=lambda kv: -kv[1]["recovered"])
         for i, (pattern, g) in enumerate(fixed[:2]):
@@ -665,8 +802,8 @@ class MerchantAssistant:
             f.draft_hi.append(f"{('Jaise' if i == 0 else 'Aur')}, {hi}: {inr(g['recovered'])} wapas.")
         if m["escalated"]:
             f.lines.append(f"{m['escalated']} case(s) worth {f.money(m['escalated_paise'])} wait for the merchant's review.")
-            f.draft_en.append(f"{m['escalated']} case(s) need a quick look from you.")
-            f.draft_hi.append(f"{m['escalated']} case par aapki nazar chahiye.")
+            f.draft_en.append(f"{m['escalated']} case(s) need your decision; they are below.")
+            f.draft_hi.append(f"{m['escalated']} case par aapka faisla chahiye, neeche dekhiye.")
 
     def _topic_greet(self, f: Facts, m: dict) -> None:
         f.lines.append("The merchant is greeting or thanking; reply warmly in one short sentence and offer more help. "
@@ -814,10 +951,10 @@ class MerchantAssistant:
                            f"{f.money(c.proof.discrepancy_paise if c.proof else 0)}.")
             f.cases.append({"case_id": c.case_id, "pattern": c.pattern, "month": c.month,
                             "amount_paise": c.proof.discrepancy_paise if c.proof else 0, "state": str(c.state)})
-        f.draft_en.append(f"{len(waiting)} case(s) worth {inr(total)} need your review, because no published rule "
-                          "decides them. Open them in the Paytm Business app to approve or dismiss.")
-        f.draft_hi.append(f"{len(waiting)} case ({inr(total)}) aapke review ke liye hain, kyunki koi published rule "
-                          "inka faisla nahi karta. Paytm Business app mein kholkar approve ya dismiss karein.")
+        f.draft_en.append(f"{len(waiting)} case(s) worth {inr(total)} need your decision, because we could not "
+                          "decide them ourselves. Each one is below: file the correction, or mark the charge correct.")
+        f.draft_hi.append(f"{len(waiting)} case ({inr(total)}) par aapka faisla chahiye, kyunki hum inhe khud tay nahi "
+                          "kar sakte. Har case neeche hai: correction file karein, ya charge sahi hai to bata dein.")
 
     def _topic_prevent(self, f: Facts, m: dict) -> None:
         fixed = [rc for rc in self.rt.root_causes(self.merchant_id) if rc.status == "APPLIED"]

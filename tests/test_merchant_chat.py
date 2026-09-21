@@ -22,6 +22,7 @@ from mfp.assistant.chat import (
     strip_preamble,
     unsupported_amounts,
 )
+from mfp.core.enums import CaseState
 from mfp.runtime.system import Runtime
 
 HERO = "MER-0001"
@@ -319,5 +320,94 @@ def test_voice_and_impact_endpoints(loop_datasets, monkeypatch):
     assert impact["lines_checked"] > 0 and impact["cases"] == metrics["proven_cases"] + metrics["escalated"]
     assert client.post("/api/chat/proactive", json={"language": "en-IN"}).json()["proactive"] is True
     assert client.post("/api/chat/listen", content=b"audio", headers={"Content-Type": "audio/webm"}).status_code == 204
+    server._state.clear()
+    server._assistants.clear()
+
+
+# -- the merchant resolves from the chat ---------------------------------------------------------------
+
+
+@pytest.fixture()
+def fresh(loop_datasets):
+    root = loop_datasets[0]
+    as_of = json.loads((root / "manifest.json").read_text(encoding="utf-8"))["as_of"]
+    runtime = Runtime(root, start=f"{as_of}T18:00:00")
+    runtime.connect(HERO)
+    runtime.run_until_quiet(60)
+    return runtime
+
+
+def test_review_cases_come_to_the_merchant_as_decisions(fresh):
+    a = MerchantAssistant(fresh, HERO, chain())
+    r = a.reply("Kya mujhe kuch karna hai?", "hinglish")
+    waiting = fresh.cases.in_state(CaseState.ESCALATED, merchant_id=HERO)
+    assert len(r["actions"]) == len(waiting) > 0
+    card = r["actions"][0]
+    assert {o["action"] for o in card["options"]} == {"file", "dismiss"} and card["why"] and card["amount_paise"] > 0
+    assert a.proactive("hinglish")["actions"], "Paytm's first message carries the decisions too"
+
+
+def test_the_merchant_files_or_dismisses_and_the_agents_carry_it_out(fresh):
+    a = MerchantAssistant(fresh, HERO, chain())
+    first, second = [c["case_id"] for c in a.review_cards()[:2]]
+    filed = a.decide(first, "file")
+    case = fresh.cases.get(first)
+    assert case.claim_id and "(merchant, via chat)" in case.human_attestation["reviewer"]
+    assert filed["claim_id"] == case.claim_id and "file" in filed["reply"]
+    assert all(c["case_id"] != first for c in filed["actions"])
+    dismissed = a.decide(second, "dismiss")
+    assert fresh.cases.get(second).state is CaseState.CLOSED and "band" in dismissed["reply"]
+    with pytest.raises(ValueError):
+        a.decide(first, "file")  # already decided
+
+
+def test_a_merchant_cannot_decide_another_merchants_case(fresh):
+    other = next(m.merchant_id for m in fresh.dataset.merchants if m.merchant_id != HERO and m.fidelity == "FULL")
+    fresh.connect(other)
+    case_id = MerchantAssistant(fresh, HERO, chain()).review_cards()[0]["case_id"]
+    with pytest.raises(KeyError):
+        MerchantAssistant(fresh, other, chain()).decide(case_id, "file")
+
+
+def test_a_reported_problem_the_records_do_not_show_becomes_a_ticket(fresh):
+    quiet = next(mid for mid in fresh.index.merchant_ids("FULL") if mid != HERO and not any(
+        c.component == "RENTAL" for c in fresh.cases.all(mid)))
+    fresh.connect(quiet)
+    r = MerchantAssistant(fresh, quiet, chain()).reply("maine soundbox wapas kar diya phir bhi rental kat raha hai", "auto")
+    assert r["ticket"]["status"] == "OPEN" and r["ticket"]["ticket_id"] in r["reply"]
+    assert fresh.tickets.for_merchant(quiet, "OPEN") and fresh.events.of_kind("ticket.opened")
+    fresh.tickets.resolve(r["ticket"]["ticket_id"], "Ops", "Pickup confirmed; rental reversed manually")
+    assert not fresh.tickets.for_merchant(quiet, "OPEN")
+
+
+def test_a_reported_problem_already_caught_shows_its_status_instead(fresh):
+    rental = [c for c in fresh.cases.all(HERO) if c.component == "RENTAL" and c.proof]
+    if not rental:
+        pytest.skip("loop dataset has no rental case for the hero")
+    r = MerchantAssistant(fresh, HERO, chain()).reply("soundbox wapas kar diya phir bhi rental kata", "hinglish")
+    assert "ticket" not in r and "₹" in r["reply"]
+
+
+def test_decide_and_ticket_endpoints(loop_datasets, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from mfp.demo import server
+    from mfp.demo.director import DemoDirector
+
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+    monkeypatch.setenv("MFP_OLLAMA_URL", "http://127.0.0.1:9")
+    server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
+    server._assistants.clear()
+    client = TestClient(server.app)
+    client.post("/api/live/select", json={"merchant_id": HERO})
+    client.post("/api/clock/advance?days=20")
+    cards = client.post("/api/chat", json={"message": "Kya mujhe kuch karna hai?"}).json()["actions"]
+    assert cards
+    decided = client.post("/api/chat/decide", json={"case_id": cards[0]["case_id"], "action": "dismiss"})
+    assert decided.status_code == 200
+    assert client.post("/api/chat/decide", json={"case_id": cards[0]["case_id"], "action": "dismiss"}).status_code == 409
+    assert client.post("/api/chat/decide", json={"case_id": "CASE-99999", "action": "file"}).status_code == 404
+    assert client.post("/api/chat/decide", json={"case_id": cards[0]["case_id"], "action": "pay me"}).status_code == 400
+    assert client.get("/api/tickets").json() == []
     server._state.clear()
     server._assistants.clear()
