@@ -124,6 +124,8 @@ body {
 }
 .note { font-size: 11.5px; color: var(--amber); padding: 0 4px; }
 
+.msg.draft .bubble { color: var(--muted); background: #F7F9FC; border: 1px dashed var(--line); box-shadow: none; }
+.msg.draft .meta span::before { content: "✎ "; }
 .typing .bubble { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .dots { display: inline-flex; gap: 4px; }
 .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--sky); animation: blink 1.2s infinite; }

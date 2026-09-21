@@ -503,7 +503,8 @@ class MerchantAssistant:
                 "language": code if code in LANGUAGES and code != "hi-IN" else detect_language(out.get("transcript", ""))}
 
     def reply(self, question: str, language: str = "auto",
-              history: list[dict[str, str]] | None = None, *, topics_override: list[str] | None = None) -> dict[str, Any]:
+              history: list[dict[str, str]] | None = None, *, topics_override: list[str] | None = None,
+              on_token=None) -> dict[str, Any]:
         """Answer one merchant message.
 
         Sarvam (when configured) writes a conversational answer from the facts in
@@ -558,7 +559,13 @@ class MerchantAssistant:
             writers.append((local, (history or [])[-4:]))  # a small model follows a short history better
         for writer, turns in writers:
             try:
-                candidate = writer.complete(system, self._messages(question, facts, draft, turns))
+                messages = self._messages(question, facts, draft, turns)
+                if on_token is not None and hasattr(writer, "stream"):
+                    # Shown to the merchant as unchecked while it is written; the guards below decide
+                    # whether it stays.
+                    candidate = writer.stream(system, messages, on_token)
+                else:
+                    candidate = writer.complete(system, messages)
             except (*NETWORK_ERRORS, BackendError) as exc:
                 note = f"{writer.name} unavailable ({type(exc).__name__})"
                 continue
@@ -1163,6 +1170,14 @@ class MerchantAssistant:
                      else "still with the merchant")
             f.lines.append(f"Device {d.device_id} ({d.device_type.lower()}): rental {f.money(d.monthly_rental_paise)} "
                            f"a month, free until {d.rental_free_until:%d %b %Y}, {state}.")
+        if not view.devices:
+            # No device records: rental cannot have been checked, so do not say it was correct.
+            f.lines.append("There are no device records for this merchant, so rental deductions were not checked.")
+            f.draft_en.append("I don't have your device records, so I could not check rental deductions. If you think a "
+                              "rental was charged wrongly, tell me and I will pass it to our team.")
+            f.draft_hi.append("Mere paas aapke device ke records nahi hain, isliye rental ki katoti check nahi ho saki. "
+                              "Agar aapko lagta hai rental galat kata, mujhe batayiye, main team ko bhej dunga.")
+            return
         self._topic_by_patterns(f, "rental", "Your device rental has been charged correctly.",
                                 "Aapka device rental sahi kata hai.")
 

@@ -52,6 +52,7 @@ PRODUCTION_PACKAGES = (
     "mfp.prevention",
     "mfp.notify",
     "mfp.assistant",
+    "mfp.ingest",
     "mfp.runtime",
     "mfp.rules",
     "mfp.fees",

@@ -150,6 +150,30 @@ class OllamaChat:
         out = _post(self.url + "/api/chat", body, {}, self.timeout)
         return out["message"]["content"].strip()
 
+    def stream(self, system: str, messages: list[dict[str, str]], on_token, *, max_tokens: int = 220) -> str:
+        """Like complete(), but hands each piece of text to on_token as the model writes it."""
+        body = {
+            "model": self.model, "stream": True, "keep_alive": "30m",
+            "options": {"temperature": 0.2, "seed": 7, "num_predict": max_tokens, "num_ctx": 4096,
+                        "repeat_penalty": 1.1},
+            "messages": [{"role": "system", "content": system}, *messages],
+        }
+        request = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+        parts: list[str] = []
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            for raw in response:
+                if not raw.strip():
+                    continue
+                chunk = json.loads(raw)
+                piece = (chunk.get("message") or {}).get("content", "")
+                if piece:
+                    parts.append(piece)
+                    on_token(piece)
+                if chunk.get("done"):
+                    break
+        return "".join(parts).strip()
+
     def warm(self) -> None:
         """Load the model into memory ahead of the first chat (the first load can take a minute)."""
         if self.available():

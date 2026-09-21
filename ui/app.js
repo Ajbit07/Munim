@@ -266,7 +266,7 @@ async function loadMerchants(force = false) {
 
 function renderLive(s) {
   const m = s.merchant;
-  $("ds-seed").textContent = `seed ${s.dataset.seed}`;
+  $("ds-seed").textContent = s.dataset.uploaded ? `${s.dataset.name} (uploaded Paytm report)` : `seed ${s.dataset.seed}`;
   $("ds-merchants").textContent = s.dataset.merchants;
   $("ds-through").textContent = niceDate(s.dataset.data_through);
   $("live-clock").textContent = `${niceDate(s.today)} · ${liveTimer ? "running: one day every 4 seconds" : "paused"}`;
@@ -374,6 +374,57 @@ $("btn-dataset").addEventListener("click", async () => {
   datasetPoll = setInterval(refreshDatasets, 2000);
 });
 
+// -- importing a real Paytm settlement report -----------------------------------------------------
+
+function bindUpload() {
+  const status = (t) => { $("up-status").textContent = t; };
+  const run = async (csv, sampleProfile) => {
+    const profile = sampleProfile || {
+      legal_name: $("up-name").value, city: $("up-city").value, mcc: $("up-mcc").value, credit: $("up-credit").value,
+      debit: $("up-debit").value, netbanking: $("up-nb").value, turnover_lakh: $("up-turnover").value,
+      sla_days: $("up-sla").value, ecommerce: $("up-eco").checked,
+    };
+    setLive(false);
+    status(`Importing ${Math.round(csv.length / 1024)} KB and auditing…`);
+    $("up-go").disabled = $("up-sample").disabled = true;
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ csv, profile }),
+      });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r.detail || "Import failed");
+      const i = r.import;
+      const aside = Object.entries(i.set_aside).map(([k, v]) => `<li>${v.toLocaleString("en-IN")} × ${esc(k)}</li>`).join("");
+      const m = r.state.metrics;
+      $("up-result").innerHTML = `<div class="summary-strip">${stat("rows read", i.rows_read.toLocaleString("en-IN"))}${stat("payments", i.payments.toLocaleString("en-IN"))}${stat("refunds", i.refunds)}${stat("payouts (UTRs)", i.payouts)}${stat("found in error", rupees(m.identified_paise), "good")}${stat("proven cases", m.proven_cases, "good")}</div>
+        <p class="note">${esc(i.first_date)} to ${esc(i.last_date)}. Columns recognised: ${i.columns_found.map(esc).join(", ")}.</p>
+        ${aside ? `<p class="note">Set aside, not guessed:</p><ul class="note">${aside}</ul>` : ""}
+        <p class="note">The audit has run. Open the <b>Cases</b> tab, or the merchant's app view, as for any merchant.</p>`;
+      status("Done.");
+      eventCursor = 0; feedItems.length = 0; $("feed").innerHTML = "";
+      await loadMerchants(true);
+      await refreshAll();
+    } catch (err) {
+      status("");
+      $("up-result").innerHTML = `<p class="review-error">${esc(err.message)}</p>`;
+    } finally {
+      $("up-go").disabled = $("up-sample").disabled = false;
+    }
+  };
+  $("up-go").addEventListener("click", async () => {
+    const file = $("up-file").files[0];
+    if (!file) { status("Choose a CSV file first."); return; }
+    run(await file.text());
+  });
+  $("up-sample").addEventListener("click", async () => {
+    status("Loading the sample report…");
+    const res = await fetch("/api/upload/sample");
+    if (!res.ok) { status("No sample report on the server. Run: python tools/export_paytm_report.py"); return; }
+    run(await res.text(), { legal_name: "Shree Ganesh Supermart", city: "Mumbai", mcc: "5411", credit: "1.80",
+      debit: "0.85", netbanking: "1.65", turnover_lakh: "455.23", sla_days: 1, ecommerce: false });
+  });
+}
+
 // -- guided tour (the scripted walk-through, for presenting) --------------------------------------
 
 function setTour(on) {
@@ -428,6 +479,8 @@ async function renderActiveTab() {
   const el = $(`tab-${tab}`);
   const render = TABS[tab];
   if (!render) return;
+  if (tab === "upload" && el.dataset.rendered) return;  // a form: never wipe what ops is typing
+  if (tab === "upload") el.dataset.rendered = "1";
   const html = await render();
   if (token !== renderToken) return;  // a newer render started; drop this stale one
   el.innerHTML = html;
@@ -435,6 +488,7 @@ async function renderActiveTab() {
     row.addEventListener("click", () => openCase(row.dataset.case));
     row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === row) openCase(row.dataset.case); });
   });
+  if (tab === "upload") bindUpload();
   el.querySelectorAll("[data-merchant]").forEach((row) => row.addEventListener("click", async () => {
     pendingMerchant = null;
     await act("/api/live/select", { body: { merchant_id: row.dataset.merchant } });
@@ -466,7 +520,36 @@ async function renderActiveTab() {
 
 const SHIELD = `<svg viewBox="0 0 32 32" width="20" height="20"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round"/></svg>`;
 
+const MCCS = [["5411", "Grocery / supermarket"], ["5499", "Food store"], ["5812", "Restaurant"], ["5912", "Pharmacy"],
+  ["5541", "Fuel station"], ["5542", "Fuel (automated)"], ["5999", "Other retail"], ["8220", "Education"],
+  ["4812", "Telecom"], ["7230", "Salon"]];
+
 const TABS = {
+  async upload() {
+    return `<p class="note">Upload a settlement report downloaded from the Paytm merchant dashboard (Reports → Settlements), as CSV.
+      The importer reads Paytm's columns (Transaction ID, Order ID, Transaction Date, Transaction Type, Status, Amount,
+      Commission, GST, Settled Amount, Settled Date, UTR No., Payment Mode) and the API's camelCase names. The report does
+      not carry the merchant's category or agreed rates, so give those below. The same engines then audit it, live.</p>
+      <form class="upload-form" id="upload-form">
+        <label class="full">Settlement report (CSV)<input type="file" id="up-file" accept=".csv,text/csv"></label>
+        <label>Merchant name<input id="up-name" value="Uploaded merchant"></label>
+        <label>City<input id="up-city" value="Mumbai"></label>
+        <label>Business category (MCC)<select id="up-mcc">${MCCS.map(([c, n]) => `<option value="${c}">${c} · ${n}</option>`).join("")}</select></label>
+        <label>Agreed credit card rate (%)<input id="up-credit" value="1.80" inputmode="decimal"></label>
+        <label>Agreed debit card rate (%)<input id="up-debit" value="0.40" inputmode="decimal"></label>
+        <label>Agreed netbanking rate (%)<input id="up-nb" value="1.50" inputmode="decimal"></label>
+        <label>Last year's turnover (₹ lakh)<input id="up-turnover" value="100" inputmode="decimal"></label>
+        <label>Settlement timeline (T + days)<input id="up-sla" value="1" inputmode="numeric"></label>
+        <label class="check"><input type="checkbox" id="up-eco"> Sells through an e-commerce operator</label>
+      </form>
+      <div class="upload-actions">
+        <button class="btn btn-solid" id="up-go">Import and audit</button>
+        <button class="btn btn-outline" id="up-sample" title="A report in Paytm's format exported from the demo data">Use the sample report</button>
+        <span class="muted" id="up-status"></span>
+      </div>
+      <div class="upload-result" id="up-result"></div>`;
+  },
+
   async merchants() {
     const p = await (await fetch("/api/portfolio")).json();
     const rows = p.merchants.map((m) => `<tr class="clickable ${m.merchant_id === p.focus ? "focus" : ""}" data-merchant="${m.merchant_id}" tabindex="0">

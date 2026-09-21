@@ -225,6 +225,15 @@ async function pollInbox() {
 }
 setInterval(pollInbox, 4000);
 
+function startDraft() {
+  // The model's words as it writes them: visibly unchecked until the guards have read the whole reply.
+  const el = document.createElement("div");
+  el.className = "msg bot draft";
+  el.innerHTML = `<div class="bubble"></div><div class="meta"><span>Writing… not yet checked</span></div>`;
+  $("thread").appendChild(el);
+  return el;
+}
+
 function showTyping() {
   const el = document.createElement("div");
   el.className = "msg bot typing";
@@ -267,20 +276,43 @@ async function send(text) {
   $("input").value = "";
   addMine(text);
   const done = showTyping();
+  let draft = null;
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, language: $("language").value, history: history.slice(-6) }),
     });
-    if (!res.ok) throw new Error(`server said ${res.status}`);
-    const r = await res.json();
-    done();
+    if (!res.ok || !res.body) throw new Error(`server said ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", r = null;
+    while (r === null) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const event = JSON.parse(buffer.slice(0, nl));
+        buffer = buffer.slice(nl + 1);
+        if (event.type === "token") {
+          if (!draft) { done(); draft = startDraft(); }
+          draft.querySelector(".bubble").textContent += event.text;
+          scrollDown();
+        } else if (event.type === "final") {
+          r = event.result;
+        } else if (event.type === "error") {
+          throw new Error(event.detail);
+        }
+      }
+    }
+    if (!r) throw new Error("the reply stream ended early");
+    if (draft) draft.remove(); else done();
     addBot(r.reply, r);
     setChips(r.suggestions);
     history.push({ role: "user", content: text }, { role: "assistant", content: r.reply });
     $("banner").hidden = true;
   } catch (err) {
-    done();
+    if (draft) draft.remove(); else done();
     $("banner").textContent = "Can't reach the Settlement Teammate server. Is python serve.py running?";
     $("banner").hidden = false;
   } finally {

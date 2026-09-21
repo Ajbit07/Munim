@@ -7,6 +7,7 @@ serialises anything that mutates it.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections import deque
 from pathlib import Path
@@ -57,7 +58,8 @@ def _state_payload(d: DemoDirector) -> dict[str, Any]:
         "steps": d.outline(),
         "last_step": d.results[-1] if d.results else None,
         "redteam": d.redteam, "baseline": d.baseline, "notification": d.notification,
-        "dataset": {"seed": d.seed, "data_through": rt.data_through.isoformat(),
+        "dataset": {"seed": d.seed, "name": d.dataset_root.name if d.dataset_root else f"seed {d.seed}",
+                    "uploaded": d.dataset_root is not None, "data_through": rt.data_through.isoformat(),
                     "merchants": len(rt.index.merchant_ids("FULL")), "connected": len(rt.connected)},
         "events": len(rt.events),
     }
@@ -190,6 +192,8 @@ def redteam_run() -> dict[str, Any]:
 def baseline_run() -> dict[str, Any]:
     with _lock:
         d = director()
+        if d.dataset_root is not None:
+            raise HTTPException(409, "An uploaded report has no clean copy to compare against")
         if not (d.data_dir / f"seed-{d.seed}-baseline" / "manifest.json").exists():
             raise HTTPException(409, "This dataset has no clean baseline")
         d.run_baseline()
@@ -236,6 +240,51 @@ def _generate(seed: int) -> None:
         _generation.update(state="ready", seconds=round(time.monotonic() - started))
     except Exception as exc:  # reported to the page, never raised into the server
         _generation.update(state="failed", error=str(exc))
+
+
+# -- a real Paytm settlement report, uploaded by ops -----------------------------------------------
+
+
+@app.post("/api/upload")
+def upload_report(body: dict[str, Any]) -> dict[str, Any]:
+    """Import a Paytm settlement report (CSV text) and audit it with the same engines, live."""
+    from mfp.ingest.paytm_report import MERCHANT_ID, MerchantProfile, ReportError, import_report
+
+    text = str(body.get("csv", ""))
+    if len(text) > 40_000_000:
+        raise HTTPException(413, "The file is larger than 40 MB")
+    p = body.get("profile") or {}
+    try:
+        profile = MerchantProfile(
+            legal_name=str(p.get("legal_name") or "Uploaded merchant")[:80], city=str(p.get("city") or "—")[:40],
+            mcc=str(p.get("mcc") or "5411")[:4], card_credit_rate_percent=str(p.get("credit") or "1.80"),
+            card_debit_rate_percent=str(p.get("debit") or "0.40"), netbanking_rate_percent=str(p.get("netbanking") or "1.50"),
+            annual_turnover_paise=int(float(p.get("turnover_lakh") or 100) * 1_00_000_00),
+            is_ecommerce_participant=bool(p.get("ecommerce")), settlement_sla_days=int(p.get("sla_days") or 1))
+        uploads = Path(os.environ.get("MFP_UPLOAD_DIR") or REPO / "data" / "uploads")
+        root = uploads / f"upload-{len(list(uploads.glob('upload-*'))) + 1 if uploads.exists() else 1}"
+        summary = import_report(text, profile, root)
+    except ReportError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except (ValueError, ArithmeticError) as exc:
+        raise HTTPException(422, f"Could not read the report: {exc}") from None
+    with _lock:
+        d = DemoDirector(dataset_root=root, merchant_id=MERCHANT_ID, start=f"{summary.last_date}T18:00:00")
+        _state["d"] = d
+        _assistants.clear()
+        d.select(MERCHANT_ID)
+        return {"import": summary.as_dict(), "dataset": root.name, "state": _state_payload(d)}
+
+
+@app.get("/api/upload/sample")
+def upload_sample():
+    """A Paytm-format report exported from the demo data (tools/export_paytm_report.py), for trying the import."""
+    from fastapi.responses import PlainTextResponse
+
+    samples = sorted((REPO / "samples").glob("paytm_settlement_report_*.csv"))
+    if not samples:
+        raise HTTPException(404, "No sample report. Run: python tools/export_paytm_report.py")
+    return PlainTextResponse(samples[0].read_text(encoding="utf-8"), headers={"X-Sample-Name": samples[0].name})
 
 
 @app.get("/api/datasets")
@@ -402,6 +451,43 @@ def chat(body: dict[str, Any]) -> dict[str, Any]:
         director().rt.events.append(Actor.SYSTEM, "merchant.chat", merchant_id=director().merchant_id,
                                     topics=result["topics"], source=result["source"], guarded=bool(result["note"]))
     return result
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: dict[str, Any]):
+    """The same answer as /api/chat, streamed: {"type":"token"} pieces while the model writes, then
+    {"type":"final"} with the checked result, which may replace what was streamed."""
+    import json as _json
+    import queue
+
+    from fastapi.responses import StreamingResponse
+
+    message = str(body.get("message", ""))
+    if not message.strip():
+        raise HTTPException(400, "message is empty")
+    history = body.get("history") if isinstance(body.get("history"), list) else []
+    events: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        try:
+            result = assistant().reply(message, str(body.get("language", "auto")), history,
+                                       on_token=lambda piece: events.put({"type": "token", "text": piece}))
+            with _lock:
+                director().rt.events.append(Actor.SYSTEM, "merchant.chat", merchant_id=director().merchant_id,
+                                            topics=result["topics"], source=result["source"],
+                                            guarded=bool(result["note"]))
+            events.put({"type": "final", "result": result})
+        except Exception as exc:  # reported to the page as a failed reply, never a hung stream
+            events.put({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
+        events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        while (item := events.get()) is not None:
+            yield _json.dumps(item, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
 @app.post("/api/chat/proactive")

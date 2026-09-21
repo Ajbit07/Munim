@@ -45,9 +45,12 @@ class DemoDirector:
     merchant_id: str = HERO
     index: int = 0
     results: list[dict[str, Any]] = field(default_factory=list)
+    dataset_root: Path | None = None      # an uploaded report instead of a generated seed
+    start: str = DEMO_START
 
     def __post_init__(self) -> None:
-        self.rt = Runtime(self.data_dir / f"seed-{self.seed}", start=DEMO_START, seed=self.seed)
+        root = self.dataset_root or self.data_dir / f"seed-{self.seed}"
+        self.rt = Runtime(root, start=self.start, seed=self.seed)
         self.showcase: Case | None = None
         self.redteam: dict[str, Any] | None = None
         self.baseline: dict[str, Any] | None = None

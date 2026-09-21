@@ -69,6 +69,16 @@ svg { display: block; }
   flex: 1; min-width: 220px; border: 1.5px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px;
   font: inherit; font-size: 14px; resize: vertical;
 }
+.upload-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 16px; margin-top: 12px; }
+.upload-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.upload-form input, .upload-form select {
+  border: 1.5px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; font: inherit; font-size: 14px;
+  color: var(--ink); background: #fff;
+}
+.upload-form label.check { flex-direction: row; align-items: center; gap: 8px; }
+.upload-form .full { grid-column: 1 / -1; }
+.upload-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.upload-result { margin-top: 14px; }
 .review-confirm { flex: 1; background: var(--sky-soft); border-radius: var(--r-sm); padding: 12px; }
 .review-confirm p { margin: 0 0 8px; font-size: 14px; color: var(--navy); font-weight: 600; }
 .review-confirm input {

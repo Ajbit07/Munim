@@ -515,3 +515,73 @@ def test_a_payment_request_without_details_asks_which_payment(fresh):
     model = FakeLocal(topic="payment")
     r = MerchantAssistant(fresh, HERO, chain(local=model)).reply("mera ek customer ka paisa nahi dikh raha", "hinglish")
     assert r["topics"] == ["payment"] and r["payments"] == [] and "Kaunsa payment" in r["reply"]
+
+
+# -- streaming --------------------------------------------------------------------------------------------
+
+
+class StreamingLocal(FakeLocal):
+    def stream(self, system, messages, on_token, *, max_tokens=220):
+        text = self.reply(messages) if callable(self.reply) else self.reply
+        for word in text.split(" "):
+            on_token(word + " ")
+        return text
+
+
+def test_replies_stream_while_written_and_the_guards_still_decide(fresh):
+    m = fresh.metrics(HERO)
+    good = StreamingLocal(f"Aapka {inr(m['recovered_paise'])} wapas aa gaya hai, bhai.")
+    pieces = []
+    r = MerchantAssistant(fresh, HERO, chain(local=good)).reply("Kitna paisa wapas aaya?", "hinglish", on_token=pieces.append)
+    assert len(pieces) > 3 and "".join(pieces).strip() == r["reply"] and r["source"] == "local:fake"
+    bad = StreamingLocal("Aapko ₹9,99,999.00 kal mil jayenge!")
+    pieces = []
+    r = MerchantAssistant(fresh, HERO, chain(local=bad)).reply("Kitna paisa wapas aaya?", "hinglish", on_token=pieces.append)
+    assert pieces and r["source"] == "template" and "9,99,999" not in r["reply"], "a streamed draft can still be replaced"
+
+
+def test_chat_stream_endpoint_and_report_upload(loop_datasets, monkeypatch, tmp_path):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from mfp.demo import server
+    from mfp.demo.director import DemoDirector
+
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+    monkeypatch.setenv("MFP_OLLAMA_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("MFP_UPLOAD_DIR", str(tmp_path / "uploads"))
+    server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
+    server._assistants.clear()
+    client = TestClient(server.app)
+    client.post("/api/live/select", json={"merchant_id": HERO})
+    with client.stream("POST", "/api/chat/stream", json={"message": "Kitna paisa wapas aaya?"}) as res:
+        events = [_json.loads(line) for line in res.iter_lines() if line]
+    assert events[-1]["type"] == "final" and "₹" in events[-1]["result"]["reply"]
+
+    report = ("Transaction ID,Order ID,Transaction Date,Transaction Type,Status,Amount,Commission,GST,Settled Amount,"
+              "Settled Date,UTR No.,Payment Mode\n"
+              "T1,O1,2026-08-20 10:00:00,ACQUIRING,SUCCESS,3000.00,12.00,2.16,2985.84,2026-08-21,UTR9,UPI\n")
+    up = client.post("/api/upload", json={"csv": report, "profile": {"legal_name": "Test Kirana", "mcc": "5411"}})
+    assert up.status_code == 200 and up.json()["import"]["payments"] == 1
+    state = client.get("/api/state").json()
+    assert state["merchant"]["legal_name"] == "Test Kirana" and state["dataset"]["uploaded"]
+    assert state["metrics"]["identified_paise"] > 0
+    assert client.post("/api/baseline/run").status_code == 409
+    assert client.post("/api/upload", json={"csv": "nothing,useful\n1,2\n"}).status_code == 422
+    server._state.clear()
+    server._assistants.clear()
+
+
+
+def test_rental_is_not_called_correct_without_device_records(tmp_path):
+    from mfp.ingest.paytm_report import MerchantProfile, import_report
+
+    report = ("Transaction ID,Order ID,Transaction Date,Transaction Type,Status,Amount,Commission,GST,Settled Amount,"
+              "Settled Date,UTR No.,Payment Mode\nT1,O1,2026-08-20 10:00:00,ACQUIRING,SUCCESS,500.00,0,0,500.00,"
+              "2026-08-21,UTR9,UPI\n")
+    s = import_report(report, MerchantProfile(), tmp_path / "up")
+    rt = Runtime(tmp_path / "up", start=f"{s.last_date}T18:00:00")
+    rt.connect("UPL-0001")
+    r = MerchantAssistant(rt, "UPL-0001", chain()).reply("Soundbox rental kyun kata?", "hinglish")
+    assert "sahi kata" not in r["reply"] and "records nahi" in r["reply"]
