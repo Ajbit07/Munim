@@ -45,9 +45,9 @@ const AGENTS = {
   MONITOR_AGENT: "Monitor agent", INVESTIGATION_AGENT: "Investigation agent", PROOF_ENGINE: "Proof engine",
   FOLLOWUP_AGENT: "Follow-up agent", WORKFLOW_ENGINE: "Claim workflow", SYSTEM: "System", HUMAN: "Person",
 };
-const INITIALS = { MONITOR_AGENT: "MO", INVESTIGATION_AGENT: "IN", PROOF_ENGINE: "PR", FOLLOWUP_AGENT: "FU", WORKFLOW_ENGINE: "WF", SYSTEM: "SY", HUMAN: "YOU" };
+const INITIALS = { MONITOR_AGENT: "MO", INVESTIGATION_AGENT: "IN", PROOF_ENGINE: "PR", FOLLOWUP_AGENT: "FU", WORKFLOW_ENGINE: "WF", SYSTEM: "SY", HUMAN: "PE" };
 const STATE_LABELS = {
-  RECOVERED: "Recovered", PARTIALLY_RECOVERED: "Partly recovered", ESCALATED: "Needs review", CLOSED_UNRECOVERED: "Not recovered",
+  RECOVERED: "Recovered", PARTIALLY_RECOVERED: "Partly recovered", ESCALATED: "Awaiting decision", CLOSED_UNRECOVERED: "Not recovered",
   WAITING: "Awaiting ops", AWAITING_CREDIT: "Approved, awaiting credit", FILED: "Correction filed", FOLLOW_UP: "Following up", REPRESENT: "Re-presenting", REJECTED: "Rejected",
   ACTION_PENDING: "Ready to claim", BATCHED: "Held (under ₹1)", CLOSED: "Closed", APPLIED: "Fix applied", REQUESTED: "Fix requested",
   RECOMMENDED: "Fix recommended", NEEDS_HUMAN: "Needs review", WITHDRAWN: "Withdrawn (paid late)",
@@ -177,7 +177,8 @@ function renderState(s) {
   $("hero-bar").style.width = `${pct}%`;
   $("hero-bar-wrap").setAttribute("aria-valuenow", String(pct));
   if (m.identified_paise > 0) {
-    $("thesis-line").textContent = `${m.proven_cases} proven cases across ${m.months_affected} months · ${pct}% recovered so far`;
+    refreshPortfolio();
+  $("thesis-line").textContent = `${m.proven_cases} proven cases across ${m.months_affected} months · ${pct}% recovered so far`;
   } else if (merchant.connected) {
     $("thesis-line").textContent = "Audit complete. Every settlement reconciles.";
   } else {
@@ -191,7 +192,7 @@ function renderState(s) {
   $("m-proven").textContent = m.proven_cases;
   $("m-active").textContent = m.active_claims;
   $("m-escalated").textContent = m.escalated;
-  $("m-escalated-note").textContent = m.human_filed_claims ? `${m.human_filed_claims} filed on your authority` : "";
+  $("m-escalated-note").textContent = m.human_filed_claims ? `${m.human_filed_claims} filed on a person's authority` : "";
   $("m-active-note").textContent = m.withdrawn ? `${m.withdrawn} withdrawn: paid late, not lost` : "";
   $("m-progress-note").textContent = m.late_settlements ? `${m.late_settlements} late settlements reported` : "";
   if (s.redteam) {
@@ -225,6 +226,27 @@ function renderState(s) {
   $("btn-advance").disabled = !merchant.connected;
   $("btn-live").disabled = !merchant.connected;
   renderLive(s);
+}
+
+// -- portfolio (ops) ----------------------------------------------------------------------------
+
+let portfolioBusy = false;
+
+async function refreshPortfolio() {
+  if (portfolioBusy) return;
+  portfolioBusy = true;
+  try {
+    const p = await (await fetch("/api/portfolio")).json();
+    $("pf-monitored").textContent = `${p.merchants_monitored} of ${p.merchants_total} merchants under watch`;
+    $("pf-found").textContent = rupees(p.identified_paise);
+    $("pf-returned").textContent = rupees(p.recovered_paise);
+    $("pf-progress").textContent = rupees(p.in_progress_paise);
+    $("pf-decisions").textContent = p.awaiting_decision;
+    $("pf-tickets").textContent = p.open_tickets;
+    $("pf-complaints").textContent = p.merchant_complaints;
+  } catch (_) { /* the offline banner covers this */ } finally {
+    portfolioBusy = false;
+  }
 }
 
 // -- live operation ----------------------------------------------------------------------------
@@ -412,11 +434,18 @@ async function renderActiveTab() {
     row.addEventListener("click", () => openCase(row.dataset.case));
     row.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === row) openCase(row.dataset.case); });
   });
+  el.querySelectorAll("[data-merchant]").forEach((row) => row.addEventListener("click", async () => {
+    pendingMerchant = null;
+    await act("/api/live/select", { body: { merchant_id: row.dataset.merchant } });
+    await loadMerchants(true);
+    openDrawer(false);
+    selectTab("cases");
+  }));
   el.querySelectorAll("[data-resolve]").forEach((btn) => btn.addEventListener("click", async () => {
     btn.disabled = true;
     await fetch(`/api/tickets/${btn.dataset.resolve}/resolve`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolved_by: "Merchant success desk", resolution: "Checked with the merchant and the device team" }),
+      body: JSON.stringify({ resolved_by: "Settlement ops desk", resolution: "Checked with the merchant and the device team" }),
     });
     await refreshAll();
   }));
@@ -434,6 +463,23 @@ async function renderActiveTab() {
 const SHIELD = `<svg viewBox="0 0 32 32" width="20" height="20"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round"/></svg>`;
 
 const TABS = {
+  async merchants() {
+    const p = await (await fetch("/api/portfolio")).json();
+    const rows = p.merchants.map((m) => `<tr class="clickable ${m.merchant_id === p.focus ? "focus" : ""}" data-merchant="${m.merchant_id}" tabindex="0">
+        <td><b>${esc(m.legal_name)}</b><div class="muted">${esc(m.city)} · MCC ${esc(m.mcc)} · ${esc(m.acquirer)}</div></td>
+        <td>${m.connected ? `<span class="pill RECOVERED">Under watch</span>` : `<span class="pill">Not connected</span>`}</td>
+        <td class="num amount">${m.connected ? rupees(m.identified_paise) : "—"}</td>
+        <td class="num">${m.connected ? rupees(m.recovered_paise) : "—"}</td>
+        <td class="num">${m.connected ? (m.awaiting_decision || "—") : "—"}</td>
+        <td class="num">${m.connected ? (m.open_tickets || "—") : "—"}</td>
+        <td class="num">${m.connected ? (m.late_payments || "—") : "—"}</td></tr>`).join("");
+    return `<div class="summary-strip">${stat("merchants under watch", `${p.merchants_monitored}/${p.merchants_total}`)}${stat("awaiting a decision", p.awaiting_decision)}${stat("open merchant tickets", p.open_tickets)}</div>
+      ${p.merchants_monitored < p.merchants_total ? `<button class="btn btn-solid" data-run="/api/live/connect-all">Put all ${p.merchants_total} merchants under watch</button>` : ""}
+      <table class="grid" style="margin-top:12px"><thead><tr><th>Merchant</th><th>Status</th><th class="num">Found</th><th class="num">Returned</th><th class="num">Decisions</th><th class="num">Tickets</th><th class="num">Late payments</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <p class="note">Click a merchant to open it. Connecting one starts the agents on its twelve months of settlements.</p>`;
+  },
+
   async impact() {
     const res = await fetch("/api/impact");
     if (res.status === 409) return `<p class="empty">Run the audit first (step 3). The comparison is computed from its results.</p>`;
@@ -493,9 +539,9 @@ const TABS = {
       </dl>
       ${t.status === "OPEN" ? `<div class="actions"><button class="btn btn-solid" data-resolve="${esc(t.ticket_id)}">Mark resolved</button></div>` : ""}
     </div>`).join("");
-    if (!items.length && !tickets.length) return `<p class="empty">Nothing needs your review. Cases the teammate cannot prove land here instead of being filed.</p>`;
+    if (!items.length && !tickets.length) return `<p class="empty">Nothing is waiting on a person for this merchant. Cases the teammate cannot prove land here instead of being filed.</p>`;
     if (!items.length) return ticketHtml;
-    return ticketHtml + `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. Filing one records your name as the authority; the teammate then follows it through.</p>` +
+    return ticketHtml + `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. The merchant can decide these in their app too; whoever decides first is recorded by name, and the teammate then follows it through.</p>` +
       items.map((c) => `<div class="card" data-case="${c.case_id}" tabindex="0" style="cursor:pointer">
       <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">Not filed</span></div>
       <dl class="kv">
@@ -675,7 +721,7 @@ function askReview(btn) {
   const box = btn.closest(".actions");
   const original = box.innerHTML;
   const question = action === "file"
-    ? "File this correction on your authority? It goes to Paytm settlement ops with your name as the approver."
+    ? "File this correction on the ops desk's authority? The reviewer's name is recorded as the approver."
     : "Dismiss this case? Nothing will be filed.";
   box.innerHTML = `<div class="review-confirm">
       <p>${question}</p>
@@ -702,7 +748,7 @@ function askReview(btn) {
     try {
       const res = await fetch(`/api/cases/${caseId}/review`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, note: input.value.trim(), reviewer: "Merchant success desk" }),
+        body: JSON.stringify({ action, note: input.value.trim(), reviewer: "Settlement ops desk" }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

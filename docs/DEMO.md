@@ -26,6 +26,12 @@ Backup: `python demo.py` tells the same story in a terminal in about 12 seconds.
 
 ## Live demo (the default screen)
 
+Two screens, two audiences. The **Settlement Ops console** (http://localhost:8000)
+is Paytm's internal tool: portfolio bar across all merchants, the Merchants
+worklist, decisions and tickets waiting on people. **Merchant's app view ↗**
+opens what the shopkeeper sees in the Paytm Business app. Say which one you are
+showing.
+
 The command center opens in live operation: no steps, no captions. You narrate
 while the system works.
 

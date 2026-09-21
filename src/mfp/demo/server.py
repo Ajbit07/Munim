@@ -130,6 +130,54 @@ def live_select(body: dict[str, Any]) -> dict[str, Any]:
         return _state_payload(d)
 
 
+@app.get("/api/portfolio")
+def portfolio() -> dict[str, Any]:
+    """The ops team's view: every merchant under watch, and what is waiting on people."""
+    with _lock:
+        d = director()
+        rt = d.rt
+        rows = []
+        for m in d.merchants():
+            mid = m["merchant_id"]
+            row = {**m, "identified_paise": 0, "recovered_paise": 0, "in_progress_paise": 0, "awaiting_decision": 0,
+                   "open_tickets": 0, "late_payments": 0}
+            if m["connected"]:
+                x = rt.metrics(mid)
+                row.update(identified_paise=x["identified_paise"], recovered_paise=x["recovered_paise"],
+                           in_progress_paise=x["in_progress_paise"], awaiting_decision=x["escalated"],
+                           open_tickets=len(rt.tickets.for_merchant(mid, "OPEN")),
+                           late_payments=len(rt.sla_breaches.get(mid, [])))
+            rows.append(row)
+        live = [r for r in rows if r["connected"]]
+        return {
+            "merchants_total": len(rows), "merchants_monitored": len(live),
+            "identified_paise": sum(r["identified_paise"] for r in live),
+            "recovered_paise": sum(r["recovered_paise"] for r in live),
+            "in_progress_paise": sum(r["in_progress_paise"] for r in live),
+            "awaiting_decision": sum(r["awaiting_decision"] for r in live),
+            "open_tickets": sum(r["open_tickets"] for r in live),
+            "late_payments": sum(r["late_payments"] for r in live),
+            "merchant_complaints": 0,
+            "focus": d.merchant_id, "merchants": rows,
+        }
+
+
+@app.post("/api/live/connect-all")
+def connect_all() -> dict[str, Any]:
+    """Put every merchant under watch; the focus stays where it is."""
+    with _lock:
+        d = director()
+        focus = d.merchant_id
+        for mid in d.rt.index.merchant_ids("FULL"):
+            if mid not in d.rt.connected:
+                d.select(mid)
+        d.merchant_id = focus
+        if focus not in d.rt.connected:
+            d.select(focus)
+        _assistants.clear()
+        return _state_payload(d)
+
+
 @app.post("/api/redteam/run")
 def redteam_run() -> dict[str, Any]:
     with _lock:
@@ -261,7 +309,7 @@ def review(case_id: str, body: dict[str, Any]) -> dict[str, Any]:
     with _lock:
         d = director()
         try:
-            d.rt.review(case_id, body.get("action", ""), body.get("reviewer") or "Merchant success desk",
+            d.rt.review(case_id, body.get("action", ""), body.get("reviewer") or "Settlement ops desk",
                         (body.get("note") or "").strip())
         except KeyError:
             raise HTTPException(404, f"No case {case_id}") from None
@@ -389,7 +437,7 @@ def ticket_resolve(ticket_id: str, body: dict[str, Any]) -> dict[str, Any]:
     with _lock:
         d = director()
         try:
-            return d.rt.tickets.resolve(ticket_id, body.get("resolved_by") or "Merchant success desk",
+            return d.rt.tickets.resolve(ticket_id, body.get("resolved_by") or "Settlement ops desk",
                                         body.get("resolution") or "Checked with the merchant").summary()
         except KeyError:
             raise HTTPException(404, f"No ticket {ticket_id}") from None

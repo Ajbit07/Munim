@@ -85,6 +85,19 @@ svg { display: block; }
 .btn-outline { background: #fff; color: var(--navy); box-shadow: inset 0 0 0 1.5px var(--line); }
 .btn-outline:hover { background: var(--line-soft); }
 
+/* -- portfolio bar (ops) ------------------------------------------------------- */
+.portfolio { background: #fff; border-bottom: 1px solid var(--line); }
+.portfolio-inner {
+  max-width: 1400px; margin: 0 auto; padding: 10px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px;
+}
+.pf-title { font-weight: 750; color: var(--navy); font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; }
+.pf-title span { margin-left: 8px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--muted); }
+.pf-stat { font-size: 12.5px; color: var(--muted); display: flex; align-items: baseline; gap: 6px; }
+.pf-stat b { font: 750 17px var(--display); color: var(--navy); font-variant-numeric: tabular-nums; }
+.pf-stat.good b { color: var(--green); }
+.pf-stat.warn b { color: var(--amber); }
+tr.focus td { background: var(--sky-soft); }
+
 /* -- app bar ---------------------------------------------------------------- */
 .appbar { background: var(--navy); color: #fff; }
 .appbar-inner {
@@ -379,3 +392,4 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
   .figures { grid-template-columns: 1fr; }
   .grid { font-size: 13px; }
 }
+.muted { color: var(--muted); font-size: 12px; font-weight: 400; }

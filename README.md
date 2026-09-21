@@ -68,7 +68,10 @@ python generate.py --seed 42 --no-leakage
 python serve.py
 ```
 
-Then open http://localhost:8000. It opens in live operation: pick any of the 25
+Then open http://localhost:8000: the **Settlement Ops console**, for Paytm's
+settlement and merchant-support team (merchants never see it; they get the
+message, the money, and the chat in their app). A portfolio bar sums every
+merchant under watch; the **Merchants** tab is the worklist. It opens in live operation: pick any of the 25
 merchants, press **Connect merchant**, then **Run live** and the agents work on
 their own. **Generate a fresh dataset** makes a new random seed in about 35
 seconds, so a judge can see nothing is pre-built. A scripted **Guided tour** is
@@ -93,7 +96,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (203, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (204, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -268,5 +271,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             203 tests incl. firewall canaries and an offline rehearsal
+tests/             204 tests incl. firewall canaries and an offline rehearsal
 ```

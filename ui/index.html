@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Settlement Teammate · Paytm Business</title>
+  <title>Settlement Ops · Paytm</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23002E6E'/><path d='M16 6l8 3v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V9z' fill='%2300BAF2'/><path d='M12.5 16.2l2.4 2.4 4.8-5' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="stylesheet" href="/ui/app.css">
 </head>
@@ -14,8 +14,8 @@
       <div class="brand">
         <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <div class="brand-text">
-          <span class="brand-name">Settlement Teammate</span>
-          <span class="brand-for">for Paytm Business</span>
+          <span class="brand-name">Settlement Ops</span>
+          <span class="brand-for">Paytm · internal · AI settlement teammate</span>
         </div>
       </div>
       <div class="appbar-right">
@@ -37,7 +37,7 @@
           <button class="btn btn-link" id="btn-exit-tour">Exit tour</button>
         </div>
         <div class="controls">
-          <button class="btn btn-ghost" id="btn-chat" title="Opens the merchant's chat in a separate window">Merchant chat ↗</button>
+          <button class="btn btn-ghost" id="btn-chat" title="What this merchant sees in the Paytm Business app (opens a separate window)">Merchant's app view ↗</button>
           <button class="btn btn-link" id="btn-tour" title="A scripted walk-through of the same system, for presenting">Guided tour</button>
           <button class="btn btn-link" id="btn-reset">Start over</button>
         </div>
@@ -47,6 +47,18 @@
 
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="offline" id="offline" role="alert" hidden>Can't reach the Settlement Teammate server. Check that <code>python serve.py</code> is running; retrying every 3 seconds.</div>
+
+  <section class="portfolio" aria-label="Portfolio">
+    <div class="portfolio-inner">
+      <div class="pf-title">Portfolio<span id="pf-monitored">—</span></div>
+      <div class="pf-stat"><b id="pf-found">₹0</b>found in error</div>
+      <div class="pf-stat good"><b id="pf-returned">₹0</b>returned, bank-confirmed</div>
+      <div class="pf-stat"><b id="pf-progress">₹0</b>being corrected</div>
+      <div class="pf-stat warn"><b id="pf-decisions">0</b>awaiting a decision</div>
+      <div class="pf-stat warn"><b id="pf-tickets">0</b>open merchant tickets</div>
+      <div class="pf-stat"><b id="pf-complaints">0</b>merchant complaints needed</div>
+    </div>
+  </section>
 
   <section class="hero" aria-live="polite">
     <div class="hero-inner">
@@ -64,16 +76,16 @@
       </div>
 
       <div class="hero-money">
-        <div class="hero-eyebrow">Paytm checked every settlement and fixed its own errors, without being asked</div>
+        <div class="hero-eyebrow">Merchant view · found and corrected without the merchant asking</div>
         <div class="hero-found" id="hero-found">₹0</div>
-        <div class="hero-back"><span id="hero-back">₹0</span> back in your account</div>
+        <div class="hero-back"><span id="hero-back">₹0</span> returned to the merchant, bank-confirmed</div>
         <div class="hero-bar" role="progressbar" aria-label="Share of found money recovered" aria-valuemin="0" aria-valuemax="100" id="hero-bar-wrap"><span id="hero-bar"></span></div>
         <div class="hero-line" id="thesis-line">The teammate has not started yet.</div>
       </div>
 
       <div class="step-card live-card live-only">
         <div class="step-eyebrow">Live operation</div>
-        <div class="step-title" id="live-title">Pick any merchant and connect it</div>
+        <div class="step-title" id="live-title">Bring a merchant under watch</div>
         <div class="step-narrative" id="live-narrative">Nothing on this screen is pre-computed. Connecting starts the agents on that merchant's twelve months of settlements; they decide what to do on their own.</div>
         <dl class="live-facts">
           <dt>Dataset</dt><dd><span id="ds-seed">—</span> · <span id="ds-merchants">—</span> merchants with full ledgers · data through <span id="ds-through">—</span></dd>
@@ -121,7 +133,7 @@
     </div>
     <div class="tile">
       <span class="tile-icon violet"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 20c.8-3.6 3.5-5.5 7-5.5s6.2 1.9 7 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
-      <span class="tile-label">Needs your review</span><span class="tile-value" id="m-escalated">0</span><span class="tile-note" id="m-escalated-note"></span>
+      <span class="tile-label">Awaiting ops decision</span><span class="tile-value" id="m-escalated">0</span><span class="tile-note" id="m-escalated-note"></span>
     </div>
     <div class="tile tile-shield">
       <span class="tile-icon green"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.6-3 8.3-7 9.5-4-1.2-7-4.9-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2.2 2.2L15.5 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -142,16 +154,18 @@
 
     <section class="panel bench" aria-label="Details">
       <nav class="segmented" role="tablist">
+        <button role="tab" aria-selected="false" data-tab="merchants">Merchants</button>
         <button role="tab" aria-selected="true" data-tab="cases">Cases</button>
         <button role="tab" aria-selected="false" data-tab="impact">Impact</button>
-        <button role="tab" aria-selected="false" data-tab="queue">Needs review</button>
+        <button role="tab" aria-selected="false" data-tab="queue">Needs decision</button>
         <button role="tab" aria-selected="false" data-tab="causes">Root causes</button>
         <button role="tab" aria-selected="false" data-tab="delays">Late settlements</button>
         <button role="tab" aria-selected="false" data-tab="network">Network</button>
         <button role="tab" aria-selected="false" data-tab="redteam">Red team</button>
         <button role="tab" aria-selected="false" data-tab="baseline">Baseline</button>
-        <button role="tab" aria-selected="false" data-tab="message">Merchant update</button>
+        <button role="tab" aria-selected="false" data-tab="message">Message to merchant</button>
       </nav>
+      <div class="tab-body" id="tab-merchants" hidden></div>
       <div class="tab-body" id="tab-cases"></div>
       <div class="tab-body" id="tab-impact" hidden></div>
       <div class="tab-body" id="tab-queue" hidden></div>

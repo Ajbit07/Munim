@@ -72,3 +72,23 @@ def test_live_mode_runs_any_merchant_on_demand(loop_datasets):
     assert listing["generation"]["state"] in ("idle", "ready", "failed", "generating")
     server._state.clear()
     server._assistants.clear()
+
+
+def test_ops_portfolio_covers_every_merchant(loop_datasets):
+    from fastapi.testclient import TestClient
+
+    from mfp.demo import server
+
+    server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
+    server._assistants.clear()
+    client = TestClient(server.app)
+    empty = client.get("/api/portfolio").json()
+    assert empty["merchants_monitored"] == 0 and empty["merchants_total"] == len(empty["merchants"]) > 1
+    focus = client.get("/api/state").json()["merchant"]["merchant_id"]
+    client.post("/api/live/connect-all")
+    p = client.get("/api/portfolio").json()
+    assert p["merchants_monitored"] == p["merchants_total"] and p["focus"] == focus
+    assert p["identified_paise"] == sum(m["identified_paise"] for m in p["merchants"]) > 0
+    assert p["merchant_complaints"] == 0
+    server._state.clear()
+    server._assistants.clear()
