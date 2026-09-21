@@ -378,8 +378,13 @@ $("btn-dataset").addEventListener("click", async () => {
 
 function bindUpload() {
   const status = (t) => { $("up-status").textContent = t; };
-  const run = async (csv, sampleProfile) => {
-    const profile = sampleProfile || {
+  const fields = ["up-name", "up-city", "up-mcc", "up-credit", "up-debit", "up-nb", "up-turnover", "up-sla", "up-eco"];
+  const syncOverride = () => fields.forEach((id) => { $(id).disabled = !$("up-override").checked; });
+  $("up-override").addEventListener("change", syncOverride);
+  syncOverride();
+  const run = async (csv) => {
+    const override = $("up-override").checked;
+    const profile = {
       legal_name: $("up-name").value, city: $("up-city").value, mcc: $("up-mcc").value, credit: $("up-credit").value,
       debit: $("up-debit").value, netbanking: $("up-nb").value, turnover_lakh: $("up-turnover").value,
       sla_days: $("up-sla").value, ecommerce: $("up-eco").checked,
@@ -389,15 +394,23 @@ function bindUpload() {
     $("up-go").disabled = $("up-sample").disabled = true;
     try {
       const res = await fetch("/api/upload", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ csv, profile }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ csv, profile, override }),
       });
       const r = await res.json();
       if (!res.ok) throw new Error(r.detail || "Import failed");
       const i = r.import;
       const aside = Object.entries(i.set_aside).map(([k, v]) => `<li>${v.toLocaleString("en-IN")} × ${esc(k)}</li>`).join("");
       const m = r.state.metrics;
+      const who = r.merchant
+        ? `<p class="note"><b>Merchant found in the records:</b> ${esc(r.merchant.legal_name)} (${esc(r.merchant.merchant_id)}), ${esc(r.merchant.city)},
+           MCC ${esc(r.merchant.mcc)}, matched by ${esc(r.merchant.matched_by)}. Agreement: credit ${esc(r.merchant.card_credit_rate_percent)}%,
+           debit ${esc(r.merchant.card_debit_rate_percent)}%, netbanking ${esc(r.merchant.netbanking_rate_percent)}%
+           (${r.merchant.agreements} agreement version${r.merchant.agreements === 1 ? "" : "s"}); ${r.merchant.devices} rented device(s); turnover
+           ${rupees(r.merchant.annual_turnover_paise)}.</p>`
+        : `<p class="note"><b>Merchant not found in the records:</b> audited with the details entered on the form${i.turnover_estimated ? "; last year's turnover estimated from the report" : ""}.</p>`;
       $("up-result").innerHTML = `<div class="summary-strip">${stat("rows read", i.rows_read.toLocaleString("en-IN"))}${stat("payments", i.payments.toLocaleString("en-IN"))}${stat("refunds", i.refunds)}${stat("payouts (UTRs)", i.payouts)}${stat("found in error", rupees(m.identified_paise), "good")}${stat("proven cases", m.proven_cases, "good")}</div>
-        <p class="note">${esc(i.first_date)} to ${esc(i.last_date)}. Columns recognised: ${i.columns_found.map(esc).join(", ")}.</p>
+        ${who}
+        <p class="note">${esc(i.first_date)} to ${esc(i.last_date)}. ${i.rentals ? `${i.rentals} rental debits checked against device records. ` : ""}Columns recognised: ${i.columns_found.map(esc).join(", ")}.</p>
         ${aside ? `<p class="note">Set aside, not guessed:</p><ul class="note">${aside}</ul>` : ""}
         <p class="note">The audit has run. Open the <b>Cases</b> tab, or the merchant's app view, as for any merchant.</p>`;
       status("Done.");
@@ -420,8 +433,9 @@ function bindUpload() {
     status("Loading the sample report…");
     const res = await fetch("/api/upload/sample");
     if (!res.ok) { status("No sample report on the server. Run: python tools/export_paytm_report.py"); return; }
-    run(await res.text(), { legal_name: "Shree Ganesh Supermart", city: "Mumbai", mcc: "5411", credit: "1.80",
-      debit: "0.85", netbanking: "1.65", turnover_lakh: "455.23", sla_days: 1, ecommerce: false });
+    $("up-override").checked = false;
+    syncOverride();
+    run(await res.text());
   });
 }
 
@@ -528,17 +542,19 @@ const TABS = {
   async upload() {
     return `<p class="note">Upload a settlement report downloaded from the Paytm merchant dashboard (Reports → Settlements), as CSV.
       The importer reads Paytm's columns (Transaction ID, Order ID, Transaction Date, Transaction Type, Status, Amount,
-      Commission, GST, Settled Amount, Settled Date, UTR No., Payment Mode) and the API's camelCase names. The report does
-      not carry the merchant's category or agreed rates, so give those below. The same engines then audit it, live.</p>
+      Commission, GST, Settled Amount, Settled Date, UTR No., Payment Mode) and the API's camelCase names. The merchant, its
+      agreed rates and amendments, category, turnover and devices are looked up automatically in the merchant records
+      (by MID, or by recognising the report's transaction IDs). Nothing needs typing. The same engines then audit it, live.</p>
       <form class="upload-form" id="upload-form">
         <label class="full">Settlement report (CSV)<input type="file" id="up-file" accept=".csv,text/csv"></label>
+        <label class="check full"><input type="checkbox" id="up-override"> The merchant is not in Paytm's records: enter their details below instead</label>
         <label>Merchant name<input id="up-name" value="Uploaded merchant"></label>
         <label>City<input id="up-city" value="Mumbai"></label>
         <label>Business category (MCC)<select id="up-mcc">${MCCS.map(([c, n]) => `<option value="${c}">${c} · ${n}</option>`).join("")}</select></label>
         <label>Agreed credit card rate (%)<input id="up-credit" value="1.80" inputmode="decimal"></label>
         <label>Agreed debit card rate (%)<input id="up-debit" value="0.40" inputmode="decimal"></label>
         <label>Agreed netbanking rate (%)<input id="up-nb" value="1.50" inputmode="decimal"></label>
-        <label>Last year's turnover (₹ lakh)<input id="up-turnover" value="100" inputmode="decimal"></label>
+        <label>Last year's turnover (₹ lakh)<input id="up-turnover" value="" placeholder="blank: estimated from the report" inputmode="decimal"></label>
         <label>Settlement timeline (T + days)<input id="up-sla" value="1" inputmode="numeric"></label>
         <label class="check"><input type="checkbox" id="up-eco"> Sells through an e-commerce operator</label>
       </form>

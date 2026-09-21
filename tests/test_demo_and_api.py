@@ -121,3 +121,38 @@ def test_a_paytm_settlement_report_is_imported_and_audited(tmp_path):
     assert found == {"mdr_on_protected_instrument", "gst_on_exempt_settlement", "refund_debited_twice"}
     with pytest.raises(ReportError):
         import_report("Order ID,Amount\n1,2\n", MerchantProfile(), tmp_path / "bad")
+
+
+def test_the_merchant_master_fills_in_the_merchant_so_nobody_types_rates(loop_datasets, tmp_path):
+    import csv
+    import io
+
+    from mfp.data.store import MerchantIndex, ObservedDataset
+    from mfp.ingest.merchant_master import MerchantMaster
+    from mfp.ingest.paytm_report import MerchantProfile, import_report, report_identity
+
+    root = loop_datasets[0]
+    view = MerchantIndex(ObservedDataset(root)).view("MER-0001")
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Transaction ID", "Order ID", "Transaction Date", "Transaction Type", "Status", "Amount", "Commission",
+                "GST", "Settled Amount", "Settled Date", "UTR No.", "Payment Mode"])
+    for t in [t for t in view.transactions if str(t.kind) == "PAYMENT"][:30]:
+        w.writerow([t.txn_id, t.order_ref, t.captured_at.strftime("%Y-%m-%d %H:%M:%S"), "ACQUIRING", "SUCCESS",
+                    f"{t.amount_paise / 100:.2f}", "", "", "", "", "", "UPI"])
+    report = out.getvalue()
+
+    master = MerchantMaster([root])
+    record = master.find(*report_identity(report))
+    assert record is not None and record.merchant.merchant_id == "MER-0001" and "transaction IDs" in record.matched_by
+    assert master.find("MER-0001", []).matched_by == "merchant ID"
+    assert master.find(None, ["NOT-A-REAL-ID"] * 10) is None
+
+    summary = import_report(report, MerchantProfile(legal_name="ignored"), tmp_path / "m", master=record)
+    assert summary.merchant_source == "merchant master" and summary.merchant_id == "MER-0001"
+    written = ObservedDataset(tmp_path / "m")
+    assert written.merchants[0].legal_name == view.merchant.legal_name
+    assert len(written.agreements) == len(view.agreements), "the whole agreement history, not one typed rate"
+
+    guessed = import_report(report, MerchantProfile(), tmp_path / "g")
+    assert guessed.merchant_source == "form" and guessed.turnover_estimated

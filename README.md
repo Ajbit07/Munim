@@ -96,7 +96,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (218, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (219, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -174,10 +174,16 @@ from the Paytm merchant dashboard (Reports → Settlements, CSV). The importer
 reads Paytm's published columns (Transaction ID, Order ID, Transaction Date,
 Transaction Type, Status, Amount, Commission, GST, Settled Amount, Settled Date,
 UTR No., Payment Mode; see [Paytm's settlement report docs](https://www.paytmpayments.com/docs/settlement-reports-on-dashboard))
-and the Settlement API's camelCase names. What the report does not carry (the
-merchant's category, agreed rates, turnover, e-commerce status, settlement
-timeline) is entered on the form. The same engines then audit it live, and the
-merchant's chat works on it like any other merchant.
+and the Settlement API's camelCase names. Nobody types the merchant's terms: the
+report is matched to the merchant's records (by MID, or by recognising its
+transaction IDs) and the category, the whole agreement history, turnover,
+e-commerce status and rented devices come from there. In production that lookup
+is Paytm's merchant master; here it is the generated merchant records
+(`ingest/merchant_master.py`). Agreed rates are never read off the report itself,
+since a year of overcharging would then look normal. The form is only an
+override for a merchant that is not in the records (turnover is then estimated
+from the report). The same engines audit it live, and the merchant's chat works
+on it like any other merchant.
 
 Rows the engines cannot judge are counted and set aside, never guessed: pending
 payments, unsupported payment modes, rental and other deduction rows, refunds
@@ -192,9 +198,10 @@ creates it):
 python tools/export_paytm_report.py
 ```
 
-Round trip on that sample: ₹24,717.17 found across 23 proven cases in about
-3 seconds, which is the full audit minus the ₹995 soundbox rental (device
-records are not part of a settlement report).
+Round trip on that sample, with nothing typed: matched to Shree Ganesh
+Supermart by 200 of 200 transaction IDs, rental debits checked against its
+device record, and ₹25,712.17 found across 28 proven cases in about 6 seconds,
+the same result as auditing the original records.
 
 The command center's **Impact** tab shows the same merchant with and without the
 teammate: money lost, problems they would have had to find, lines to check by
@@ -317,5 +324,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             218 tests incl. firewall canaries and an offline rehearsal
+tests/             219 tests incl. firewall canaries and an offline rehearsal
 ```

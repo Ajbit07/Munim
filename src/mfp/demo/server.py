@@ -248,32 +248,38 @@ def _generate(seed: int) -> None:
 @app.post("/api/upload")
 def upload_report(body: dict[str, Any]) -> dict[str, Any]:
     """Import a Paytm settlement report (CSV text) and audit it with the same engines, live."""
-    from mfp.ingest.paytm_report import MERCHANT_ID, MerchantProfile, ReportError, import_report
+    from mfp.ingest.merchant_master import default_master
+    from mfp.ingest.paytm_report import MerchantProfile, ReportError, import_report, report_identity
 
     text = str(body.get("csv", ""))
     if len(text) > 40_000_000:
         raise HTTPException(413, "The file is larger than 40 MB")
     p = body.get("profile") or {}
     try:
+        # Who the report belongs to, and their terms, come from the merchant master; the form is only an
+        # override for a merchant that is not in the records.
+        master = None if body.get("override") else default_master(REPO).find(*report_identity(text))
+        turnover = p.get("turnover_lakh")
         profile = MerchantProfile(
             legal_name=str(p.get("legal_name") or "Uploaded merchant")[:80], city=str(p.get("city") or "—")[:40],
             mcc=str(p.get("mcc") or "5411")[:4], card_credit_rate_percent=str(p.get("credit") or "1.80"),
             card_debit_rate_percent=str(p.get("debit") or "0.40"), netbanking_rate_percent=str(p.get("netbanking") or "1.50"),
-            annual_turnover_paise=int(float(p.get("turnover_lakh") or 100) * 1_00_000_00),
+            annual_turnover_paise=int(float(turnover) * 1_00_000_00) if turnover not in (None, "") else None,
             is_ecommerce_participant=bool(p.get("ecommerce")), settlement_sla_days=int(p.get("sla_days") or 1))
         uploads = Path(os.environ.get("MFP_UPLOAD_DIR") or REPO / "data" / "uploads")
         root = uploads / f"upload-{len(list(uploads.glob('upload-*'))) + 1 if uploads.exists() else 1}"
-        summary = import_report(text, profile, root)
+        summary = import_report(text, profile, root, master=master)
     except ReportError as exc:
         raise HTTPException(422, str(exc)) from None
     except (ValueError, ArithmeticError) as exc:
         raise HTTPException(422, f"Could not read the report: {exc}") from None
     with _lock:
-        d = DemoDirector(dataset_root=root, merchant_id=MERCHANT_ID, start=f"{summary.last_date}T18:00:00")
+        d = DemoDirector(dataset_root=root, merchant_id=summary.merchant_id, start=f"{summary.last_date}T18:00:00")
         _state["d"] = d
         _assistants.clear()
-        d.select(MERCHANT_ID)
-        return {"import": summary.as_dict(), "dataset": root.name, "state": _state_payload(d)}
+        d.select(summary.merchant_id)
+        return {"import": summary.as_dict(), "merchant": master.summary() if master else None,
+                "dataset": root.name, "state": _state_payload(d)}
 
 
 @app.get("/api/upload/sample")

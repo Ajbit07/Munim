@@ -73,8 +73,8 @@ paise; across all filed cases the difference is ₹0.01.
 | Chat on the local model takes about 6–11 s a reply on a 4 GB GPU, and a 4B model can misstate things | Guards catch wrong figures, invented numbers, review money called returned, and wrong language; a misstatement that uses only correct figures and none of those words can still get through | assistant/chat.py |
 | Chat topic routing is keyword-first; a model is asked only when no keyword matches | A message mixing topics answers the first one | assistant/chat.py |
 | n8n verified live in Docker (every lifecycle step, 0 fallbacks); evaluation numbers use the in-process workflow for speed | Identical decisions either way; the workflow only executes steps | README.md |
-| An uploaded Paytm report is audited against one agreement entered on the form, with the report's UTRs standing in for the bank statement | Mid-year rate changes are not visible, and a payout the bank never credited would not be caught | ingest/paytm_report.py |
-| Rental and other deduction rows in an uploaded report are set aside | Device records are not in a settlement report; the chat says rental was not checked rather than calling it correct | ingest/paytm_report.py |
+| An uploaded Paytm report is matched to the generated merchant records, standing in for Paytm's merchant master; its UTRs stand in for the bank statement | A merchant not in the records falls back to one agreement typed on the form; a payout the bank never credited would not be caught | ingest/merchant_master.py, ingest/paytm_report.py |
+| For a merchant not in the records, rental and other deduction rows are set aside | Without device records the chat says rental was not checked rather than calling it correct | ingest/paytm_report.py |
 | Signature-only merchants' signatures are simulated from fault profiles | Network patterns combine simulated and real agent emissions | DATA.md |
 
 ---

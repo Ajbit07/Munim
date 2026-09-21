@@ -72,6 +72,7 @@ COLUMNS = {  # canonical -> accepted spellings, compared lower-case with non-alp
     "tcs": ("tcs",),
     "tds": ("tds",),
     "payout_id": ("payoutid",),
+    "mid": ("mid", "merchantid"),
 }
 REQUIRED = ("txn_id", "txn_date", "amount", "payment_mode")
 
@@ -92,7 +93,7 @@ class MerchantProfile:
     card_credit_rate_percent: str = "1.80"
     card_debit_rate_percent: str = "0.40"
     netbanking_rate_percent: str = "1.50"
-    annual_turnover_paise: int = 1_00_00_000_00          # Rs 1 crore unless told otherwise
+    annual_turnover_paise: int | None = None              # None: estimated from the report itself
     is_ecommerce_participant: bool = False
     settlement_sla_days: int = 1
     upi_class: str = "P2M"
@@ -111,6 +112,11 @@ class ImportSummary:
     first_date: str | None = None
     last_date: str | None = None
     columns_found: list[str] = field(default_factory=list)
+    rentals: int = 0
+    merchant_id: str = ""
+    merchant_source: str = "form"            # "merchant master" when the report was matched to a record
+    matched_by: str | None = None
+    turnover_estimated: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         d = dict(self.__dict__)
@@ -205,11 +211,24 @@ def read_rows(text: str) -> tuple[list[dict[str, str]], list[str]]:
     return rows, sorted(set(mapping.values()))
 
 
-def import_report(text: str, profile: MerchantProfile, out_dir: Path) -> ImportSummary:
-    """Write an observed dataset for one merchant from a Paytm report. Returns what was read and set aside."""
+def report_identity(text: str) -> tuple[str | None, list[str]]:
+    """The MID (when the report has that column) and the transaction IDs, for the merchant master lookup."""
+    rows, _ = read_rows(text)
+    mids = {r.get("mid") for r in rows if r.get("mid")}
+    return (mids.pop() if len(mids) == 1 else None), [r["txn_id"] for r in rows if r.get("txn_id")]
+
+
+def import_report(text: str, profile: MerchantProfile, out_dir: Path, master=None) -> ImportSummary:
+    """Write an observed dataset for one merchant from a Paytm report. Returns what was read and set aside.
+
+    With a MasterRecord (see merchant_master.py) the merchant, its agreement history and its devices come from
+    the merchant's records and the profile is ignored; device records also let rental debits be checked.
+    """
     rows, columns = read_rows(text)
     summary = ImportSummary(rows_read=len(rows), columns_found=columns)
-    mid = MERCHANT_ID
+    mid = master.merchant.merchant_id if master is not None else MERCHANT_ID
+    summary.merchant_id = mid
+    devices = {d.device_id for d in master.devices} if master is not None else set()
     transactions: dict[str, Transaction] = {}
     pending_lines: list[tuple[date, str | None, dict]] = []
     payment_by_order: dict[str, str] = {}
@@ -218,6 +237,9 @@ def import_report(text: str, profile: MerchantProfile, out_dir: Path) -> ImportS
     for n, row in enumerate(rows, start=1):
         kind = _kind(row.get("txn_type", ""))
         if kind is None:
+            if _key(row.get("txn_type", "")) == "rental" and _rental(row, devices, pending_lines):
+                summary.rentals += 1
+                continue
             summary.set_aside[f"other deduction type ({row.get('txn_type') or 'blank'})"] += 1
             continue
         if kind is TxnKind.PAYMENT:
@@ -251,7 +273,8 @@ def import_report(text: str, profile: MerchantProfile, out_dir: Path) -> ImportS
             lines.append(SettlementLine(line_id=f"{batch_id}-L{i:05d}", batch_id=batch_id, merchant_id=mid, **m))
         batches.append(SettlementBatch(
             batch_id=batch_id, merchant_id=mid, settlement_date=settled_on,
-            cycle_dates=tuple(sorted({m["captured_at"].date() for m in members})), line_count=len(members),
+            cycle_dates=tuple(sorted({m["captured_at"].date() for m in members if m.get("captured_at")}
+                                     or {settled_on})), line_count=len(members),
             utr=utr if totals["net_paise"] > 0 else None, carried_forward=totals["net_paise"] <= 0, **totals))
         if utr and totals["net_paise"] > 0:  # the report's payout stands in for the bank statement line
             credits.append(BankCredit(credit_id=f"CR-{batch_id}", merchant_id=mid, value_date=settled_on,
@@ -259,21 +282,34 @@ def import_report(text: str, profile: MerchantProfile, out_dir: Path) -> ImportS
                                       narration=f"PAYTM SETTLEMENT {utr} (from settlement report)"))
     summary.settled_lines, summary.payouts = len(lines), len(credits)
 
-    merchant = Merchant(merchant_id=mid, legal_name=profile.legal_name, registered_mcc=profile.mcc, city=profile.city,
-                        acquirer_id="PAYTM", fidelity="FULL", onboarded_on=first - timedelta(days=1),
-                        is_ecommerce_participant=profile.is_ecommerce_participant, upi_class=profile.upi_class,
-                        annual_turnover_paise=profile.annual_turnover_paise)
-    rates = dict(card_credit_rate_percent=Decimal(profile.card_credit_rate_percent),
-                 card_debit_rate_percent=Decimal(profile.card_debit_rate_percent),
-                 netbanking_rate_percent=Decimal(profile.netbanking_rate_percent))
-    agreement = MerchantAgreement(agreement_id=f"AGR-{mid}", merchant_id=mid, signed_on=first - timedelta(days=1),
-                                  settlement_sla_days=profile.settlement_sla_days, **rates)
-    config = ProcessorConfigSnapshot(snapshot_id=f"CFG-{mid}", merchant_id=mid, effective_from=first - timedelta(days=1),
-                                     pricing_mcc=profile.mcc, **rates)
-    files = {"merchants.jsonl": [merchant], "agreements.jsonl": [agreement], "processor_config.jsonl": [config],
+    if master is not None:
+        summary.merchant_source, summary.matched_by = "merchant master", master.matched_by
+        merchant, agreements, configs, device_records = (master.merchant, master.agreements,
+                                                         master.processor_config, master.devices)
+    else:
+        turnover = profile.annual_turnover_paise
+        if turnover is None:  # the RBI debit band needs last year's turnover: estimate it from the report
+            span = max((as_of - first).days, 1)
+            paid = sum(t.amount_paise for t in transactions.values()
+                       if t.kind is TxnKind.PAYMENT and str(t.status) == "SUCCESS")
+            turnover = int(paid * 365 / span) if span < 365 else paid
+            summary.turnover_estimated = True
+        merchant = Merchant(merchant_id=mid, legal_name=profile.legal_name, registered_mcc=profile.mcc,
+                            city=profile.city, acquirer_id="PAYTM", fidelity="FULL", onboarded_on=first - timedelta(days=1),
+                            is_ecommerce_participant=profile.is_ecommerce_participant, upi_class=profile.upi_class,
+                            annual_turnover_paise=turnover)
+        rates = dict(card_credit_rate_percent=Decimal(profile.card_credit_rate_percent),
+                     card_debit_rate_percent=Decimal(profile.card_debit_rate_percent),
+                     netbanking_rate_percent=Decimal(profile.netbanking_rate_percent))
+        agreements = [MerchantAgreement(agreement_id=f"AGR-{mid}", merchant_id=mid, signed_on=first - timedelta(days=1),
+                                        settlement_sla_days=profile.settlement_sla_days, **rates)]
+        configs = [ProcessorConfigSnapshot(snapshot_id=f"CFG-{mid}", merchant_id=mid,
+                                           effective_from=first - timedelta(days=1), pricing_mcc=profile.mcc, **rates)]
+        device_records = []
+    files = {"merchants.jsonl": [merchant], "agreements.jsonl": agreements, "processor_config.jsonl": configs,
              "transactions.jsonl": sorted(transactions.values(), key=lambda t: t.captured_at),
              "settlement_batches.jsonl": batches, "settlement_lines.jsonl": lines, "bank_credits.jsonl": credits,
-             "network_signatures.jsonl": [], "devices.jsonl": []}
+             "network_signatures.jsonl": [], "devices.jsonl": device_records}
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, records in files.items():
         (out_dir / name).write_text("".join(r.model_dump_json() + "\n" for r in records), encoding="utf-8")
@@ -282,6 +318,20 @@ def import_report(text: str, profile: MerchantProfile, out_dir: Path) -> ImportS
                 "import": summary.as_dict()}
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return summary
+
+
+def _rental(row: dict[str, str], devices: set[str], pending_lines: list) -> bool:
+    """A rental debit for a known device ("<device_id>:<YYYY-MM>" in the ID column) becomes a rental line."""
+    ref = row.get("txn_id", "")
+    settled_on, settled = _when(row.get("settled_date", "")), _amount(row.get("settled_amount", ""))
+    if ":" not in ref or ref.split(":")[0] not in devices or settled_on is None or settled is None:
+        return False
+    debit = -abs(settled)
+    pending_lines.append((settled_on.date(), (row.get("utr") or "").strip() or None, {
+        "line_type": LineType.RENTAL, "txn_id": None, "instrument": None, "captured_at": None,
+        "gross_paise": debit, "mdr_paise": 0, "gst_paise": 0, "tcs_paise": 0, "tds_paise": 0, "net_paise": debit,
+        "charge_ref": ref}))
+    return True
 
 
 def _take(row, n, kind, parent, profile, mid, transactions, pending_lines, payment_by_order, summary) -> None:
