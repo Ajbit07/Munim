@@ -1,7 +1,7 @@
 [project]
 name = "mfp"
 version = "0.1.0"
-description = "Merchant Financial Protection Agent - an autonomous settlement protection teammate"
+description = "Munim - Paytm's autonomous settlement teammate: finds, proves and corrects settlement errors"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.9", "fastapi>=0.115", "uvicorn>=0.30"]
 

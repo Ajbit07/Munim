@@ -24,14 +24,14 @@ from mfp.runtime.views import case_detail, human_queue, late_settlements
 REPO = Path(__file__).resolve().parents[3]
 UI = REPO / "ui"
 
-app = FastAPI(title="Merchant Financial Protection Agent", docs_url="/api/docs")
+app = FastAPI(title="Munim · Paytm settlement ops", docs_url="/api/docs")
 
 
 @app.middleware("http")
 async def no_stale_ui(request, call_next):
     # The UI changes between rehearsals; never let a browser show an old copy on stage.
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/ui/"):
+    if request.url.path in ("/", "/chat") or request.url.path.startswith("/ui/"):
         response.headers["Cache-Control"] = "no-store"
     return response
 _lock = threading.RLock()

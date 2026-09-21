@@ -756,7 +756,8 @@ class MerchantAssistant:
     def _system(self, language: str) -> str:
         m = self.rt.dataset.merchant(self.merchant_id)
         return (
-            f"You are the Paytm Business settlement assistant, chatting with {m.legal_name}, a merchant in {m.city}. "
+            f"You are Munim, Paytm's settlement assistant in the Paytm Business app, chatting with {m.legal_name}, "
+            f"a merchant in {m.city}. Like a shop's munim, you keep their accounts straight. "
             "Paytm checks every settlement it sends and corrects its own errors without the merchant having to "
             "complain. Answer ONLY from the FACTS you are given.\n"
             f"Rules:\n1. Reply in {LANGUAGES[language]}.\n"

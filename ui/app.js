@@ -168,7 +168,7 @@ function renderState(s) {
   $("merchant-line").textContent = `${merchant.city} · MCC ${merchant.mcc} · ${merchant.acquirer}`;
   const status = $("agent-status");
   status.classList.toggle("on", merchant.connected);
-  status.innerHTML = `<span class="dot"></span>${merchant.connected ? "AI teammate active" : "Teammate not started"}`;
+  status.innerHTML = `<span class="dot"></span>${merchant.connected ? "Munim is watching" : "Not under watch yet"}`;
   $("today").textContent = niceDate(s.today);
   $("complaints").textContent = m.open_complaints;
 
@@ -176,6 +176,7 @@ function renderState(s) {
   $("hero-back").textContent = rupees(m.recovered_paise);
   const pct = m.identified_paise ? Math.round((100 * m.recovered_paise) / m.identified_paise) : 0;
   $("hero-bar").style.width = `${pct}%`;
+  $("hero-tick").classList.toggle("on", m.recovered_paise > 0);  // Munim ticks the entry once money is back
   $("hero-bar-wrap").setAttribute("aria-valuenow", String(pct));
   if (m.identified_paise > 0) {
     refreshPortfolio();
@@ -183,7 +184,7 @@ function renderState(s) {
   } else if (merchant.connected) {
     $("thesis-line").textContent = "Audit complete. Every settlement reconciles.";
   } else {
-    $("thesis-line").textContent = "The teammate has not started yet.";
+    $("thesis-line").textContent = "Munim has not opened this bahi yet.";
   }
 
   $("m-identified").textContent = rupees(m.identified_paise);
@@ -728,7 +729,7 @@ const TABS = {
       <div class="phone"><div class="phone-screen">
         <div class="phone-time">9:41</div>
         <div class="notif">
-          <div class="notif-head">${SHIELD}Paytm Business · Settlement Teammate<span class="when">now</span></div>
+          <div class="notif-head">${SHIELD}Paytm Business · Munim<span class="when">now</span></div>
           <div class="notif-title">Settlement update</div>
           <div class="notif-text">${esc(step.text)}</div>
         </div>

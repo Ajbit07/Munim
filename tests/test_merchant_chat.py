@@ -241,7 +241,7 @@ def test_chat_api_answers_from_the_demo_runtime(loop_datasets, monkeypatch):
     server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
     server._assistants.clear()
     client = TestClient(server.app)
-    assert "Settlement Assistant" in client.get("/chat").text
+    assert "Munim" in client.get("/chat").text
     assert client.get("/api/chat/status").json()["active"] == "template"
     for _ in range(3):
         client.post("/api/demo/next")

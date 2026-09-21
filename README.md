@@ -1,4 +1,7 @@
-# Settlement Teammate
+# Munim · मुनीम
+
+A munim is the accountant who keeps an Indian shop's bahi-khata straight. This one
+works for every Paytm merchant at once.
 
 **Paytm checks every settlement for its merchants and fixes its own errors
 before anyone has to complain.**
@@ -68,7 +71,7 @@ python generate.py --seed 42 --no-leakage
 python serve.py
 ```
 
-Then open http://localhost:8000: the **Settlement Ops console**, for Paytm's
+Then open http://localhost:8000: the **Munim ops console**, for Paytm's
 settlement and merchant-support team (merchants never see it; they get the
 message, the money, and the chat in their app). A portfolio bar sums every
 merchant under watch; the **Merchants** tab is the worklist. It opens in live operation: pick any of the 25

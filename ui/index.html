@@ -4,18 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Settlement Ops · Paytm</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23002E6E'/><path d='M16 6l8 3v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V9z' fill='%2300BAF2'/><path d='M12.5 16.2l2.4 2.4 4.8-5' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <title>Munim · Paytm settlement ops</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect x='7' y='5' width='27' height='31' rx='3' fill='%23C8102E'/><rect x='7' y='5' width='5' height='31' rx='2' fill='%238E0B20'/><rect x='14.5' y='9' width='16' height='23' rx='1.5' fill='%23FFF6F7'/><path d='M17.5 21l3 3 6-7' stroke='%230F7B55' stroke-width='2.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body>
   <header class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 4v8c0 7-4.7 12.3-11 14.5C9.7 27.3 5 22 5 15V7z" fill="#00BAF2"/><path d="M11 15.8l3.4 3.4 6.6-6.8" stroke="#fff" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="brand-icon" viewBox="0 0 40 40" aria-hidden="true"><rect x="7" y="5" width="27" height="31" rx="3" fill="#C8102E"/><rect x="7" y="5" width="5" height="31" rx="2" fill="#8E0B20"/><path d="M9.5 8v25" stroke="#F4C7CE" stroke-width="1" stroke-dasharray="2 2"/><rect x="14.5" y="9" width="16" height="23" rx="1.5" fill="#FFF6F7"/><path d="M17.5 21l3 3 6-7" stroke="#0F7B55" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M34 16h3" stroke="#00BAF2" stroke-width="2.4" stroke-linecap="round"/></svg>
         <div class="brand-text">
-          <span class="brand-name">Settlement Ops</span>
-          <span class="brand-for">Paytm · internal · AI settlement teammate</span>
+          <span class="brand-name">Munim <span class="brand-deva" lang="hi">मुनीम</span></span>
+          <span class="brand-for">Paytm settlement ops · internal</span>
         </div>
       </div>
       <div class="appbar-right">
@@ -46,7 +46,7 @@
   </header>
 
   <div class="toast" id="toast" role="status" hidden></div>
-  <div class="offline" id="offline" role="alert" hidden>Can't reach the Settlement Teammate server. Check that <code>python serve.py</code> is running; retrying every 3 seconds.</div>
+  <div class="offline" id="offline" role="alert" hidden>Can't reach the Munim server. Check that <code>python serve.py</code> is running; retrying every 3 seconds.</div>
 
   <section class="portfolio" aria-label="Portfolio">
     <div class="portfolio-inner">
@@ -75,12 +75,25 @@
         </div>
       </div>
 
-      <div class="hero-money">
-        <div class="hero-eyebrow">Merchant view · found and corrected without the merchant asking</div>
-        <div class="hero-found" id="hero-found">₹0</div>
-        <div class="hero-back"><span id="hero-back">₹0</span> returned to the merchant, bank-confirmed</div>
-        <div class="hero-bar" role="progressbar" aria-label="Share of found money recovered" aria-valuemin="0" aria-valuemax="100" id="hero-bar-wrap"><span id="hero-bar"></span></div>
-        <div class="hero-line" id="thesis-line">The teammate has not started yet.</div>
+      <div class="hero-money bahi">
+        <div class="bahi-spine" aria-hidden="true"></div>
+        <div class="bahi-page">
+          <div class="hero-eyebrow">This merchant's bahi · kept by Munim, without the merchant asking</div>
+          <div class="bahi-cols">
+            <div class="bahi-col galat">
+              <span class="bahi-label">Galat kata <small>deducted wrongly</small></span>
+              <div class="hero-found" id="hero-found">₹0</div>
+            </div>
+            <div class="bahi-col jama">
+              <span class="bahi-label">Jama wapas <small>returned, bank-confirmed</small></span>
+              <div class="hero-back"><span id="hero-back">₹0</span>
+                <svg class="tick" id="hero-tick" viewBox="0 0 48 36" aria-hidden="true"><path d="M4 20c5 3 9 7 13 12C23 20 32 10 44 3"/></svg>
+              </div>
+            </div>
+          </div>
+          <div class="hero-bar" role="progressbar" aria-label="Share of wrongly deducted money returned" aria-valuemin="0" aria-valuemax="100" id="hero-bar-wrap"><span id="hero-bar"></span></div>
+          <div class="hero-line" id="thesis-line">Munim has not opened this bahi yet.</div>
+        </div>
       </div>
 
       <div class="step-card live-card live-only">
@@ -145,7 +158,7 @@
   <main class="workspace">
     <section class="panel feed-panel" aria-label="Autonomous activity">
       <div class="panel-head">
-        <h2>Live activity</h2>
+        <h2>Live log <span class="h2-deva" lang="hi">रोज़नामचा</span></h2>
         <span class="live" id="busy" hidden><span class="dot"></span>Working</span>
       </div>
       <ol class="feed" id="feed"></ol>

@@ -313,7 +313,7 @@ async function send(text) {
     $("banner").hidden = true;
   } catch (err) {
     if (draft) draft.remove(); else done();
-    $("banner").textContent = "Can't reach the Settlement Teammate server. Is python serve.py running?";
+    $("banner").textContent = "Can't reach the Munim server. Is python serve.py running?";
     $("banner").hidden = false;
   } finally {
     busy = false;
@@ -353,7 +353,7 @@ async function startSarvamRecording() {
       }
       showBanner("Awaaz samajh nahi aayi. Dobara boliye ya likhiye.");
     } catch (_) {
-      showBanner("Can't reach the Settlement Teammate server. Is python serve.py running?");
+      showBanner("Can't reach the Munim server. Is python serve.py running?");
     } finally {
       micState("idle");
     }
@@ -411,7 +411,7 @@ async function paytmSpeaksFirst() {
     done();
     const badge = document.createElement("div");
     badge.className = "found-for-you";
-    badge.textContent = "Paytm found this for you";
+    badge.textContent = "Munim found this for you";
     $("thread").appendChild(badge);
     addBot(r.reply, r);
     setChips(r.suggestions);
@@ -437,12 +437,12 @@ async function boot() {
     if (s.connected) {
       await paytmSpeaksFirst();
     } else {
-      addBot(`Namaste ${first} ji! Hum abhi aapke settlements check kar rahe hain. Command center mein story shuru kijiye, phir yahan poochiye.`);
+      addBot(`Namaste ${first} ji! Main Munim hoon, aapke settlements ka hisaab rakhta hoon. Abhi check shuru nahi hua; jaise hi hoga, yahin bataunga.`);
       setChips(s.suggestions);
     }
   } catch (err) {
     $("engine").textContent = "Offline";
-    $("banner").textContent = "Can't reach the Settlement Teammate server. Is python serve.py running?";
+    $("banner").textContent = "Can't reach the Munim server. Is python serve.py running?";
     $("banner").hidden = false;
   }
 }

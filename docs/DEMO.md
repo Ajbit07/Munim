@@ -26,7 +26,7 @@ Backup: `python demo.py` tells the same story in a terminal in about 12 seconds.
 
 ## Live demo (the default screen)
 
-Two screens, two audiences. The **Settlement Ops console** (http://localhost:8000)
+Two screens, two audiences. The **Munim ops console** (http://localhost:8000)
 is Paytm's internal tool: portfolio bar across all merchants, the Merchants
 worklist, decisions and tickets waiting on people. **Merchant's app view ↗**
 opens what the shopkeeper sees in the Paytm Business app. Say which one you are
@@ -78,7 +78,7 @@ Optional beats if time allows:
 - **Impact tab** (after step 8): with and without the teammate, side by side,
   every figure computed. This is the one-screen summary for the pitch.
 - **Merchant chat ↗** (after step 8): a separate phone-style window. It opens
-  with Paytm's own message, badged "Paytm found this for you": the money
+  with Paytm's own message, badged "Munim found this for you": the money
   already returned, two examples, and what needs the merchant, followed by a card
   for each case that needs them. Press **Haan, correction file karo** on one and
   confirm: it is filed on the merchant's authority and the ops console updates.

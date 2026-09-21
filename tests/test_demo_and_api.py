@@ -33,7 +33,7 @@ def test_api_serves_state_steps_cases_and_ui(loop_datasets):
 
     server._state["d"] = DemoDirector(data_dir=loop_datasets[0].parent, seed=5)
     client = TestClient(server.app)
-    assert "Settlement Teammate" in client.get("/").text
+    assert "Munim" in client.get("/").text
     assert client.get("/api/state").json()["metrics"]["open_complaints"] == 0
     assert client.post("/api/clock/advance").status_code == 409  # nothing connected yet
     for _ in range(3):
