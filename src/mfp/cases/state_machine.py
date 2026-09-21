@@ -31,7 +31,10 @@ ALLOWED: dict[CaseState, frozenset[CaseState]] = {
     S.BATCHED: frozenset({S.ACTION_PENDING}),
     S.ACTION_PENDING: frozenset({S.FILED, S.WITHDRAWN}),
     S.FILED: frozenset({S.WAITING}),
-    S.WAITING: frozenset({S.FOLLOW_UP, S.RECOVERED, S.PARTIALLY_RECOVERED, S.REJECTED, S.WITHDRAWN}),
+    # An approval is not money. Recovered is reachable only through AWAITING_CREDIT, once the
+    # reversal credit has been seen in a settlement and the bank statement.
+    S.WAITING: frozenset({S.FOLLOW_UP, S.AWAITING_CREDIT, S.REJECTED, S.WITHDRAWN}),
+    S.AWAITING_CREDIT: frozenset({S.RECOVERED, S.PARTIALLY_RECOVERED, S.ESCALATED}),
     S.FOLLOW_UP: frozenset({S.WAITING, S.ESCALATED, S.WITHDRAWN}),
     S.REJECTED: frozenset({S.REPRESENT, S.CLOSED_UNRECOVERED, S.ESCALATED}),
     S.REPRESENT: frozenset({S.FILED, S.FOLLOW_UP}),
@@ -48,7 +51,7 @@ TERMINAL = frozenset(s for s, nxt in ALLOWED.items() if not nxt)
 # Only a person may move a case out of the human queue. The agents cannot
 # overrule the proof gate; a reviewer can, and the log says so.
 HUMAN_ONLY = frozenset({(S.ESCALATED, S.ACTION_PENDING), (S.ESCALATED, S.CLOSED)})
-IN_FLIGHT = frozenset({S.FILED, S.WAITING, S.FOLLOW_UP, S.REJECTED, S.REPRESENT})
+IN_FLIGHT = frozenset({S.FILED, S.WAITING, S.FOLLOW_UP, S.REJECTED, S.REPRESENT, S.AWAITING_CREDIT})
 
 
 class IllegalTransition(RuntimeError):
@@ -97,6 +100,10 @@ class Case:
     follow_ups: int = 0
     hold_reason: str | None = None
     human_attestation: dict[str, Any] | None = None
+    approved_paise: int = 0                 # what settlement ops approved; not money until it is credited
+    approved_at: datetime | None = None
+    payout_chases: int = 0
+    refund_credit: dict[str, Any] | None = None   # the settlement line and bank credit that paid it back
     regression: bool = False
     history: list[Transition] = field(default_factory=list)
 
@@ -129,6 +136,7 @@ class Case:
             "claim_id": self.claim_id, "root_cause_id": self.root_cause_id, "follow_ups": self.follow_ups,
             "hold_reason": self.hold_reason, "escalation": self.escalation,
             "human_attestation": self.human_attestation, "regression": self.regression,
+            "approved_paise": self.approved_paise, "refund_credit": self.refund_credit,
         }
 
 

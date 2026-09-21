@@ -103,6 +103,7 @@ class CaseState(StrEnum):
     REJECTED = "REJECTED"
     REPRESENT = "REPRESENT"
     ESCALATED = "ESCALATED"
+    AWAITING_CREDIT = "AWAITING_CREDIT"     # approved; the reversal credit has not reached the bank yet
     PARTIALLY_RECOVERED = "PARTIALLY_RECOVERED"
     RECOVERED = "RECOVERED"
     CLOSED_UNRECOVERED = "CLOSED_UNRECOVERED"

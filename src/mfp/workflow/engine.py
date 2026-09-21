@@ -77,6 +77,10 @@ class LocalWorkflowEngine:
         self.desk.chase(claim.claim_id, self.clock.now())
         self._step(claim, "FOLLOW_UP", engine)
 
+    def chase_payout(self, claim: Claim, engine: str | None = None) -> None:
+        self.desk.chase_payout(claim.claim_id, self.clock.now())
+        self._step(claim, "PAYOUT_CHASE", engine)
+
     def withdraw(self, claim: Claim, reason: str, engine: str | None = None) -> None:
         self.desk.withdraw(claim.claim_id)
         claim.status = ClaimStatus.WITHDRAWN
@@ -137,3 +141,7 @@ class N8nWorkflowEngine:
 
     def withdraw(self, claim: Claim, reason: str) -> None:
         self.local.withdraw(claim, reason, self._engine(self._call("withdraw", claim)))
+
+    def chase_payout(self, claim: Claim) -> None:
+        # Routed through n8n's follow-up branch; the body says which follow-up it is.
+        self.local.chase_payout(claim, self._engine(self._call("follow_up", claim, kind="payout")))

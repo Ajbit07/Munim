@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 ACTOR = Actor.FOLLOWUP_AGENT
 S = CaseState
 CHECK_AFTER = timedelta(days=3)
+CREDIT_CHECK_EVERY = timedelta(days=1)   # how often incoming credits are checked after an approval
+CREDIT_GRACE = timedelta(days=5)         # an approved reversal not credited by then is chased
+MAX_PAYOUT_CHASES = 3
 MAX_FOLLOW_UPS = 3
 MAX_REPRESENTS = 2
 
@@ -148,6 +151,54 @@ class FollowUpAgent:
         for case in rt.cases.in_state(S.WAITING):
             if case.next_check_at and now >= case.next_check_at:
                 self._check(case)
+        for case in rt.cases.in_state(S.AWAITING_CREDIT):
+            if case.next_check_at and now >= case.next_check_at:
+                self._check_credit(case)
+
+    def _check_credit(self, case: Case) -> None:
+        """Recovered means the money is in the merchant's bank, matched by reference and amount."""
+        rt = self.rt
+        sm = rt.state_machine
+        claim = self.claims[case.claim_id]
+        credit = rt.adjustments.find(case.merchant_id, claim.reference or claim.claim_id, rt.clock.today())
+        if credit is not None:
+            paid = credit.amount_paise
+            claim.recovered_paise = case.recovered_paise = paid
+            case.refund_credit = credit.summary()
+            rt.events.append(ACTOR, "recovery.confirmed", case_id=case.case_id, merchant_id=case.merchant_id,
+                             claim_id=claim.claim_id, recovered_paise=paid, batch_id=credit.batch_id, utr=credit.utr,
+                             settlement_date=credit.settlement_date.isoformat(),
+                             reason=f"Reversal credit arrived in {credit.batch_id} on {credit.settlement_date:%d %b} "
+                                    f"(UTR {credit.utr}), matching the approved amount" if paid == case.approved_paise
+                                    else f"Reversal credit arrived short: Rs {paid / 100:,.2f} of Rs {case.approved_paise / 100:,.2f}")
+            if paid >= claim.amount_paise:
+                sm.transition(case, S.RECOVERED, ACTOR,
+                              f"Rs {paid / 100:,.2f} credited in {credit.batch_id} (UTR {credit.utr})",
+                              evidence=[credit.credit_id, credit.batch_id, credit.utr], decision="close")
+            else:
+                sm.transition(case, S.PARTIALLY_RECOVERED, ACTOR,
+                              f"Rs {paid / 100:,.2f} of Rs {claim.amount_paise / 100:,.2f} credited in {credit.batch_id}",
+                              evidence=[credit.credit_id, credit.batch_id, credit.utr])
+                sm.transition(case, S.CLOSED, ACTOR, "Settlement ops' position is final for the remainder")
+            rt.remember(case)
+            return
+        waited = rt.clock.now() - (case.approved_at or rt.clock.now())
+        if waited < CREDIT_GRACE:
+            case.next_check_at = rt.clock.now() + CREDIT_CHECK_EVERY
+            return
+        case.payout_chases += 1
+        if case.payout_chases > MAX_PAYOUT_CHASES:
+            case.escalation = {"reason": f"Approved {waited.days} days ago, but the reversal credit never arrived",
+                               "missing": ["reversal credit in settlement"], "agent_action": "Human follow-up with payouts",
+                               "claim": f"APPROVED as {claim.reference}", "disputed_paise": case.approved_paise}
+            sm.transition(case, S.ESCALATED, ACTOR, "Approved but unpaid after repeated chases; escalating",
+                          decision="escalate")
+            return
+        rt.workflow.chase_payout(claim)
+        rt.events.append(ACTOR, "payout.chased", case_id=case.case_id, merchant_id=case.merchant_id,
+                         claim_id=claim.claim_id, days_waited=waited.days, chase=case.payout_chases,
+                         reason=f"Approved {waited.days} days ago and still not credited")
+        case.next_check_at = rt.clock.now() + CREDIT_CHECK_EVERY
 
     def _check(self, case: Case) -> None:
         rt = self.rt
@@ -178,21 +229,16 @@ class FollowUpAgent:
         attachments = sorted(claim.attachments)
         if response.status in (ClaimStatus.APPROVED, ClaimStatus.PARTIALLY_APPROVED):
             rt.memory.record_response(case.pattern, response.reason_code, attachments, str(response.status))
-            claim.recovered_paise = response.approved_paise
-            case.recovered_paise = response.approved_paise
-            rt.events.append(ACTOR, "recovery.confirmed", case_id=case.case_id, merchant_id=case.merchant_id,
-                             claim_id=claim.claim_id, recovered_paise=response.approved_paise,
-                             reason="Reversal credit confirmed against the claim")
-            if response.status is ClaimStatus.APPROVED:
-                sm.transition(case, S.RECOVERED, ACTOR, f"Recovered Rs {response.approved_paise / 100:,.2f}",
-                              result=response.message, decision="close")
-            else:
-                sm.transition(case, S.PARTIALLY_RECOVERED, ACTOR,
-                              f"Partially recovered Rs {response.approved_paise / 100:,.2f} of Rs {claim.amount_paise / 100:,.2f}",
-                              result=response.message)
-                sm.transition(case, S.CLOSED, ACTOR, "Desk position is final for this return period")
+            case.approved_paise = response.approved_paise
+            case.approved_at = rt.clock.now()
+            case.next_check_at = rt.clock.now() + CREDIT_CHECK_EVERY
+            rt.events.append(ACTOR, "payout.awaiting", case_id=case.case_id, merchant_id=case.merchant_id,
+                             claim_id=claim.claim_id, approved_paise=response.approved_paise, reference=claim.reference,
+                             reason="Approved by settlement ops; not counted as recovered until the credit arrives")
+            sm.transition(case, S.AWAITING_CREDIT, ACTOR,
+                          f"Approved Rs {response.approved_paise / 100:,.2f}; watching settlements for the reversal credit",
+                          result=response.message, action="check incoming credits daily")
             rt.confirm_prevention(case)
-            rt.remember(case)
             return
 
         code = rt.reasoner.interpret_response(response.message) or response.reason_code

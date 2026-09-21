@@ -13,6 +13,13 @@ not a pushover:
 
 That behaviour is what the Follow-up Agent must work through, and what the
 memory store learns from.
+
+An approval is only a promise. The settlement system then pays the reversal as
+an ADJUSTMENT credit in a later settlement, with its own batch and bank UTR
+(SettlementAdjustments). Most arrive within two banking days; a few get stuck
+until someone chases them. The Follow-up Agent counts money as recovered only
+when the credit has landed, reading it the way a merchant reads a bank
+statement: by reference and amount, never from the desk's internal state.
 """
 
 from __future__ import annotations
@@ -23,6 +30,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
+
+from mfp.reconciliation.calendar import add_banking_days
+
+PAYOUT_STUCK_PROBABILITY = 0.05
 
 
 class ClaimStatus(StrEnum):
@@ -86,6 +97,45 @@ class Claim:
         }
 
 
+@dataclass(frozen=True)
+class AdjustmentCredit:
+    """A reversal paid into the merchant's account: one settlement line, one batch, one bank credit."""
+
+    credit_id: str
+    merchant_id: str
+    claim_id: str
+    reference: str           # the correction reference, carried in the narration
+    amount_paise: int
+    settlement_date: date
+    batch_id: str
+    utr: str
+
+    @property
+    def narration(self) -> str:
+        return f"ADJUSTMENT CR {self.reference}"
+
+    def summary(self) -> dict[str, Any]:
+        return {"credit_id": self.credit_id, "reference": self.reference, "amount_paise": self.amount_paise,
+                "settlement_date": self.settlement_date.isoformat(), "batch_id": self.batch_id, "utr": self.utr,
+                "narration": self.narration}
+
+
+class SettlementAdjustments:
+    """Reversal credits as they reach merchants' bank accounts."""
+
+    def __init__(self) -> None:
+        self._credits: list[AdjustmentCredit] = []
+
+    def pay(self, credit: AdjustmentCredit) -> None:
+        self._credits.append(credit)
+
+    def landed(self, merchant_id: str, through: date) -> list[AdjustmentCredit]:
+        return [c for c in self._credits if c.merchant_id == merchant_id and c.settlement_date <= through]
+
+    def find(self, merchant_id: str, reference: str, through: date) -> AdjustmentCredit | None:
+        return next((c for c in self.landed(merchant_id, through) if c.reference == reference), None)
+
+
 @dataclass
 class _DeskEntry:
     claim: Claim
@@ -102,6 +152,8 @@ class MockClaimsDesk:
         self.seed = seed
         self._entries: dict[str, _DeskEntry] = {}
         self._refs = 0
+        self.adjustments = SettlementAdjustments()
+        self._stuck: dict[str, tuple[Claim, int]] = {}   # approved but not paid until chased
 
     def _rng(self, claim_id: str, attempt: int, salt: str = "") -> random.Random:
         digest = hashlib.sha256(f"{self.seed}/{claim_id}/{attempt}/{salt}".encode()).hexdigest()
@@ -132,7 +184,33 @@ class MockClaimsDesk:
         if entry is None or entry.respond_at is None or now < entry.respond_at:
             return None
         del self._entries[claim_id]
-        return self._decide(entry.claim, entry.attempt, entry.respond_at)
+        response = self._decide(entry.claim, entry.attempt, entry.respond_at)
+        if response.status in (ClaimStatus.APPROVED, ClaimStatus.PARTIALLY_APPROVED):
+            self._schedule_payout(entry.claim, response.approved_paise, entry.respond_at)
+        return response
+
+    # -- paying approved reversals ------------------------------------------------------------
+
+    def _schedule_payout(self, claim: Claim, amount: int, approved_at: datetime) -> None:
+        rng = self._rng(claim.claim_id, claim.attempts, "payout")
+        if rng.random() < PAYOUT_STUCK_PROBABILITY:
+            self._stuck[claim.claim_id] = (claim, amount)
+            return
+        self._pay(claim, amount, add_banking_days(approved_at.date(), rng.randint(1, 2)))
+
+    def _pay(self, claim: Claim, amount: int, on: date) -> None:
+        digest = hashlib.sha256(f"{self.seed}/{claim.claim_id}/{claim.reference}".encode()).hexdigest()
+        self.adjustments.pay(AdjustmentCredit(
+            credit_id=f"CR-ADJ-{claim.claim_id}", merchant_id=claim.merchant_id, claim_id=claim.claim_id,
+            reference=claim.reference or claim.claim_id, amount_paise=amount, settlement_date=on,
+            batch_id=f"ADJ-{claim.merchant_id}-{on:%Y%m%d}-{claim.claim_id[-5:]}",
+            utr=f"PYTMA{int(digest[:12], 16) % 10**12:012d}"))
+
+    def chase_payout(self, claim_id: str, now: datetime) -> None:
+        """A chased payout that was stuck is released for the next banking day."""
+        if claim_id in self._stuck:
+            claim, amount = self._stuck.pop(claim_id)
+            self._pay(claim, amount, add_banking_days(now.date(), 1))
 
     def _decide(self, claim: Claim, attempt: int, at: datetime) -> ClaimResponse:
         rng = self._rng(claim.claim_id, attempt, "decide")

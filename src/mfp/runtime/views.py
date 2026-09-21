@@ -73,6 +73,8 @@ def case_detail(rt: Runtime, case_id: str, sample: int = 8) -> dict[str, Any]:
             "authorises_claim": proof.authorises_claim,
         },
         "claim": claim.summary() if claim else None,
+        "refund_credit": case.refund_credit,
+        "approved_paise": case.approved_paise,
         "root_cause": rc.summary() if rc else None,
         "similar_cases": [{k: p.get(k) for k in ("case_id", "pattern", "month", "state", "outcome", "similarity")}
                           for p in case.similar_cases],

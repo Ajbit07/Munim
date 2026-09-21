@@ -48,7 +48,7 @@ const AGENTS = {
 const INITIALS = { MONITOR_AGENT: "MO", INVESTIGATION_AGENT: "IN", PROOF_ENGINE: "PR", FOLLOWUP_AGENT: "FU", WORKFLOW_ENGINE: "WF", SYSTEM: "SY", HUMAN: "YOU" };
 const STATE_LABELS = {
   RECOVERED: "Recovered", PARTIALLY_RECOVERED: "Partly recovered", ESCALATED: "Needs review", CLOSED_UNRECOVERED: "Not recovered",
-  WAITING: "Awaiting ops", FILED: "Correction filed", FOLLOW_UP: "Following up", REPRESENT: "Re-presenting", REJECTED: "Rejected",
+  WAITING: "Awaiting ops", AWAITING_CREDIT: "Approved, awaiting credit", FILED: "Correction filed", FOLLOW_UP: "Following up", REPRESENT: "Re-presenting", REJECTED: "Rejected",
   ACTION_PENDING: "Ready to claim", BATCHED: "Held (under ₹1)", CLOSED: "Closed", APPLIED: "Fix applied", REQUESTED: "Fix requested",
   RECOMMENDED: "Fix recommended", NEEDS_HUMAN: "Needs review", WITHDRAWN: "Withdrawn (paid late)",
   RECURRED: "Fix did not hold",
@@ -63,7 +63,7 @@ const stat = (label, value, cls = "") => `<div class="chip-stat ${cls}"><b>${val
 
 // -- activity feed ---------------------------------------------------------------
 
-const SHOW_STATES = new Set(["FILED", "PARTIALLY_RECOVERED", "ESCALATED", "REJECTED", "REPRESENT", "CLOSED_UNRECOVERED", "FOLLOW_UP", "WITHDRAWN", "CLOSED"]);
+const SHOW_STATES = new Set(["AWAITING_CREDIT", "FILED", "PARTIALLY_RECOVERED", "ESCALATED", "REJECTED", "REPRESENT", "CLOSED_UNRECOVERED", "FOLLOW_UP", "WITHDRAWN", "CLOSED"]);
 
 function describe(e) {
   const p = e.payload || {};
@@ -92,7 +92,11 @@ function describe(e) {
     case "workflow.n8n.step": return [`n8n executed the ${p.action.replaceAll("_", "-")} step for ${p.claim_id}.`];
     case "pattern.recurred": return [`${c}the fix confirmed earlier did not hold: ${pattern(p.pattern).toLowerCase()} is back. Correction re-requested.`, "alert"];
     case "workflow.fallback": return [`n8n unreachable; the claim continues on the local workflow.`, "alert"];
-    case "recovery.confirmed": return [`${rupees(p.recovered_paise, true)} back in the merchant's account (${p.claim_id}).`, "money"];
+    case "recovery.confirmed": return [p.utr
+      ? `${rupees(p.recovered_paise, true)} credited to the merchant's bank in ${p.batch_id} on ${niceDate(p.settlement_date)} (UTR ${p.utr}). Verified against the approved amount.`
+      : `${rupees(p.recovered_paise, true)} back in the merchant's account (${p.claim_id}).`, "money"];
+    case "payout.awaiting": return [`${c}approved by settlement ops for ${rupees(p.approved_paise, true)}. Not counted as recovered until the credit reaches the bank.`];
+    case "payout.chased": return [`${c}approved ${p.days_waited} days ago but not yet credited. Payout chased (${p.chase}).`, "alert"];
     case "prevention.requested": return [`${c}fix requested so this stops recurring.`];
     case "prevention.applied": return [`${c}fix confirmed. This leak is closed.`, "money"];
     case "proof_gate.blocked": return [`Proof gate refused a claim on ${e.case_id}: ${(p.problems || []).join("; ")}.`, "alert"];
@@ -595,7 +599,19 @@ async function openCase(caseId) {
   const decisions = d.history.filter((h) => ["PROVEN", "UNPROVEN", "ESCALATED", "ACTION_PENDING", "BATCHED", "CLOSED"].includes(h.to_state))
     .map((h) => `<div>${esc(STATE_LABELS[h.to_state] || h.to_state)}: ${esc(h.reason)}</div>`).join("");
   const step = (n, label, content) => `<li data-n="${n}"><div class="chain-card"><div class="chain-label">${label}</div>${content}</div></li>`;
-  const outcome = c.recovered_paise ? `<b class="cr">${rupees(c.recovered_paise, true)} back in the merchant's account</b>` : chip(c.state);
+  const credit = d.refund_credit;
+  const outcome = credit
+    ? `<b class="cr">${rupees(c.recovered_paise, true)} back in the merchant's account</b>
+       <table class="grid" style="margin-top:8px"><tbody>
+         <tr><td>Settlement line</td><td class="mono">${esc(credit.narration)}</td></tr>
+         <tr><td>Batch</td><td class="mono">${esc(credit.batch_id)}</td></tr>
+         <tr><td>Credited on</td><td>${niceDate(credit.settlement_date)}</td></tr>
+         <tr><td>Bank UTR</td><td class="mono">${esc(credit.utr)}</td></tr>
+       </tbody></table>
+       <div class="note">Counted as recovered only after this credit appeared, matched by reference and amount.</div>`
+    : c.state === "AWAITING_CREDIT"
+      ? `${chip(c.state)} <div class="note">Settlement ops approved ${rupees(d.approved_paise, true)}. The teammate checks incoming credits daily and chases if it is late.</div>`
+      : c.recovered_paise ? `<b class="cr">${rupees(c.recovered_paise, true)} back in the merchant's account</b>` : chip(c.state);
   const rootCause = d.root_cause ? `<div class="note" style="margin-top:6px">Root cause: ${esc(d.root_cause.cause)}. Fix: ${esc(d.root_cause.prevention_action)}</div>` : "";
 
   $("drawer-body").innerHTML = `

@@ -84,6 +84,7 @@ class Runtime:
         self.cases = CaseRepository()
 
         self.desk = MockClaimsDesk(seed)
+        self.adjustments = self.desk.adjustments   # reversal credits as they reach merchants' accounts
         local = LocalWorkflowEngine(self.desk, self.clock, self.events)
         choice = (workflow or os.environ.get("MFP_WORKFLOW", "local")).lower()
         self.workflow = N8nWorkflowEngine(local) if choice == "n8n" else local

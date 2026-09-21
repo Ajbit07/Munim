@@ -273,6 +273,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pill.CLOSED_UNRECOVERED, .pill.fail { background: var(--red-soft); color: var(--red); }
 .pill.WITHDRAWN { background: var(--sky-soft); color: #007FB0; }
 .pill.RECURRED { background: var(--red-soft); color: var(--red); }
+.pill.AWAITING_CREDIT { background: var(--sky-soft); color: #007FB0; }
 .pill.WAITING, .pill.FILED, .pill.FOLLOW_UP, .pill.REPRESENT, .pill.REJECTED, .pill.ACTION_PENDING, .pill.REQUESTED, .pill.RECOMMENDED { background: var(--amber-soft); color: var(--amber); }
 
 .card { border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; margin: 10px 0; background: var(--card); }

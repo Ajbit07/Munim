@@ -59,6 +59,13 @@ DISCOVERED → INVESTIGATING → CANDIDATE → PROVING → PROVEN → ACTION_PEN
                                                                                      │              └→ ESCALATED
 ```
 
+An approval is not money: `WAITING → AWAITING_CREDIT` on approval, and only
+`AWAITING_CREDIT → RECOVERED | PARTIALLY_RECOVERED` once the reversal credit has
+landed in a settlement and the bank statement, matched by the correction
+reference and the approved amount (the case keeps the batch, date and UTR). A
+credit still missing 5 days after approval is chased; after 3 chases the case
+goes to a person (`AWAITING_CREDIT → ESCALATED`).
+
 Also: `FILED | WAITING | FOLLOW_UP → WITHDRAWN` when a missing payment arrives
 late, and `ESCALATED → ACTION_PENDING | CLOSED`, which only `Actor.HUMAN` may
 take (`HUMAN_ONLY`; an agent attempting it raises `IllegalTransition`).

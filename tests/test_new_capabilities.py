@@ -188,3 +188,47 @@ def test_live_n8n_executes_the_claim_lifecycle():
     url = os.environ.get("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/mfp-claim-lifecycle")
     reply = httpx.post(url, json={"step": "submit", "claim_id": "CLM-LIVE-TEST", "case_id": "CASE-LIVE"}, timeout=10)
     assert reply.status_code == 200 and reply.json().get("executed_by") == "n8n"
+
+
+# -- recovered means credited ---------------------------------------------------------------------
+
+
+def test_recovered_only_after_the_credit_lands_in_the_bank(hero):
+    recovered = [c for c in hero.cases.all(HERO) if c.state is CaseState.RECOVERED]
+    assert recovered
+    for case in recovered:
+        credit = case.refund_credit
+        assert credit and credit["amount_paise"] == case.recovered_paise == case.approved_paise
+        assert credit["settlement_date"] <= hero.clock.today().isoformat()
+        states = [t.to_state for t in case.history]
+        assert states.index("AWAITING_CREDIT") < states.index("RECOVERED")
+        claim = hero.followup.claims[case.claim_id]
+        assert credit["reference"] == claim.reference and credit["utr"].startswith("PYTMA")
+
+
+def test_an_approval_alone_can_never_mark_a_case_recovered(hero):
+    case = next(c for c in hero.cases.all(HERO) if c.state is CaseState.RECOVERED)
+    case.state = CaseState.WAITING
+    with pytest.raises(IllegalTransition):
+        hero.state_machine.transition(case, CaseState.RECOVERED, Actor.FOLLOWUP_AGENT, "approval is not money")
+    case.state = CaseState.RECOVERED
+
+
+def test_a_stuck_payout_is_chased_and_then_credited(loop_datasets, monkeypatch):
+    from mfp.workflow import claims
+
+    monkeypatch.setattr(claims, "PAYOUT_STUCK_PROBABILITY", 1.0)
+    rt = run(loop_datasets[0])
+    assert rt.events.of_kind("payout.chased")
+    assert any(c.state is CaseState.RECOVERED and c.payout_chases >= 1 for c in rt.cases.all(HERO))
+
+
+def test_approved_but_never_paid_goes_to_a_person(loop_datasets, monkeypatch):
+    from mfp.workflow import claims
+
+    monkeypatch.setattr(claims, "PAYOUT_STUCK_PROBABILITY", 1.0)
+    monkeypatch.setattr(claims.MockClaimsDesk, "chase_payout", lambda self, claim_id, now: None)
+    rt = run(loop_datasets[0])
+    unpaid = [c for c in rt.cases.all(HERO) if c.escalation and "never arrived" in c.escalation["reason"]]
+    assert unpaid and all(c.recovered_paise == 0 and c.state is CaseState.ESCALATED for c in unpaid)
+    assert rt.metrics(HERO)["recovered_paise"] == 0

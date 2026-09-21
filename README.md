@@ -93,7 +93,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (192, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (196, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -255,5 +255,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             192 tests incl. firewall canaries and an offline rehearsal
+tests/             196 tests incl. firewall canaries and an offline rehearsal
 ```

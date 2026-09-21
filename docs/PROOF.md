@@ -106,6 +106,16 @@ on 15 Oct 2026.
 - **Materiality.** A proven case below ₹1 is held BATCHED, not discarded. Batched
   cases of one pattern are filed together once they reach ₹500.
 
+## Recovered means credited
+
+Settlement ops approving a correction does not count as recovery. The simulated
+settlement system pays each approved reversal as an `ADJUSTMENT CR <reference>`
+line in a later settlement, with its own batch and bank UTR; about 1 in 20 is
+stuck until chased. The Follow-up Agent marks a case recovered only when that
+credit has landed, matching reference and amount, and shows the credit in the
+case drawer. An approval that is never paid is chased and then escalated, and
+contributes nothing to the recovered total.
+
 ## Tested guarantees
 
 - A reasoner that insists everything is owed produces identical metrics to the
@@ -113,4 +123,7 @@ on 15 Oct 2026.
 - Filing an escalated case raises `ProofGateViolation` and logs `proof_gate.blocked`.
 - Every filed claim's proof hash equals its candidate's hash.
 - Red team: 32 of 32 scenarios, including 7 genuine controls, 0 false claims.
+- No case reaches RECOVERED without a landed credit matching the approved amount
+  (`test_recovered_only_after_the_credit_lands_in_the_bank`); approved-but-unpaid
+  cases escalate with nothing counted (`test_approved_but_never_paid_goes_to_a_person`).
 - Only `Actor.HUMAN` can release an escalated case (`test_only_a_person_can_release_an_escalated_case`).
