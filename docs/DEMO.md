@@ -84,7 +84,11 @@ Optional beats if time allows:
   confirm: it is filed on the merchant's authority and the ops console updates.
   Type "maine soundbox wapas kar diya phir bhi rental kat raha hai" on a merchant
   whose records show no rental problem: a ticket goes to the team and appears in
-  **Needs review**. Tap the mic and speak a question, or type. Ask
+  **Needs review**. Try "15 Sep ka ₹682 ka payment kahan hai?" (payment lookup),
+  "CASE-00023 ka proof dikhao" (proof card), and "mujhe kisi insaan se baat
+  karni hai" (hand-off). Answer that ticket in the ops console's **Needs
+  decision** tab: the reply appears in the merchant's chat within seconds.
+  Tap the mic and speak a question, or type. Ask
   "Soundbox rental kyun kata?" and it answers instantly from the device record
   and the rental case, written by the local model (about 6–11 seconds). Ask
   "मेरा साउंडबॉक्स का किराया क्यों कटा?" and it replies in Hindi with the return

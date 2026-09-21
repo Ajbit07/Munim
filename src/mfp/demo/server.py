@@ -425,6 +425,30 @@ def chat_decide(body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(409, str(exc)) from None
 
 
+@app.post("/api/chat/appeal")
+def chat_appeal(body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return assistant().appeal(str(body.get("case_id", "")), str(body.get("reason", "")),
+                                  str(body.get("language", "hinglish")))
+    except KeyError:
+        raise HTTPException(404, "No such case for this merchant") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.get("/api/chat/inbox")
+def chat_inbox(since: int = -1) -> dict[str, Any]:
+    """Messages Paytm sent into the chat. since=-1 returns only the cursor, so opening the chat
+    does not replay history the proactive message already summarises."""
+    with _lock:
+        d = director()
+        inbox = d.rt.inbox
+        if since < 0:
+            return {"next": inbox.latest_id(), "messages": []}
+        messages = inbox.since(d.merchant_id, since)
+        return {"next": inbox.latest_id(), "messages": [m.summary() for m in messages]}
+
+
 @app.get("/api/tickets")
 def tickets() -> list[dict[str, Any]]:
     with _lock:

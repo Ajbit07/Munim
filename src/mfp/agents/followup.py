@@ -171,6 +171,12 @@ class FollowUpAgent:
                              reason=f"Reversal credit arrived in {credit.batch_id} on {credit.settlement_date:%d %b} "
                                     f"(UTR {credit.utr}), matching the approved amount" if paid == case.approved_paise
                                     else f"Reversal credit arrived short: Rs {paid / 100:,.2f} of Rs {case.approved_paise / 100:,.2f}")
+            rt.inbox.post(case.merchant_id, "refund.credited",
+                          f"₹{paid / 100:,.2f} aapke account mein aa gaya ({credit.settlement_date:%d %b}, UTR {credit.utr}). "
+                          f"Yeh {case.case_id} ki correction ka paisa hai.",
+                          f"₹{paid / 100:,.2f} reached your account on {credit.settlement_date:%d %b} (UTR {credit.utr}), "
+                          f"for correction {case.case_id}.",
+                          case_id=case.case_id, utr=credit.utr, amount_paise=paid)
             if paid >= claim.amount_paise:
                 sm.transition(case, S.RECOVERED, ACTOR,
                               f"Rs {paid / 100:,.2f} credited in {credit.batch_id} (UTR {credit.utr})",

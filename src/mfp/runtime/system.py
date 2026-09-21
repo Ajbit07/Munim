@@ -28,6 +28,7 @@ from mfp.agents.monitor import MonitorAgent
 from mfp.agents.reasoner import DeterministicReasoner, Reasoner
 from mfp.cases.state_machine import IN_FLIGHT, Case, CaseRepository, CaseStateMachine
 from mfp.cases.tickets import TicketDesk
+from mfp.notify.inbox import MerchantInbox
 from mfp.core.clock import VirtualClock
 from mfp.core.enums import Actor, CaseState, Instrument, MerchantClass
 from mfp.core.events import EventLog
@@ -86,7 +87,8 @@ class Runtime:
 
         self.desk = MockClaimsDesk(seed)
         self.adjustments = self.desk.adjustments   # reversal credits as they reach merchants' accounts
-        self.tickets = TicketDesk(self.clock, self.events)
+        self.inbox = MerchantInbox(self.clock)
+        self.tickets = TicketDesk(self.clock, self.events, self.inbox)
         local = LocalWorkflowEngine(self.desk, self.clock, self.events)
         choice = (workflow or os.environ.get("MFP_WORKFLOW", "local")).lower()
         self.workflow = N8nWorkflowEngine(local) if choice == "n8n" else local
@@ -253,9 +255,26 @@ class Runtime:
     def mark_recurred(self, rc_id: str) -> None:
         self._prevention_status[rc_id] = "RECURRED"
 
+    def appeal(self, case_id: str, reason: str, by: str) -> Case:
+        """A merchant disputes a case the agents closed without recovery; a person decides it."""
+        case = self.cases.get(case_id)
+        if case.state is not S.CLOSED_UNRECOVERED:
+            raise ValueError(f"{case_id} is {case.state}; only cases closed without recovery can be appealed")
+        reason = (reason or "").strip()[:400] or "The merchant disagrees with the outcome"
+        case.escalation = {"reason": f"Merchant appealed: {reason}", "appeal": True, "appealed_by": by,
+                           "missing": ["ops decision on the merchant's appeal"],
+                           "agent_action": "Ops to re-file or uphold the outcome",
+                           "disputed_paise": case.proof.discrepancy_paise if case.proof else case.detected_paise}
+        self.state_machine.transition(case, S.ESCALATED, Actor.HUMAN, f"{by} appealed: {reason}",
+                                      decision="appeal", action="sent to the ops desk")
+        self.events.append(Actor.HUMAN, "case.appealed", case_id=case_id, merchant_id=case.merchant_id,
+                           by=by, reason=reason)
+        return case
+
     def review(self, case_id: str, action: str, reviewer: str, note: str = "") -> Case:
         """A person acts on a case in the human queue."""
         case = self.cases.get(case_id)
+        appealed = bool(case.escalation and case.escalation.get("appeal"))
         if case.state is not S.ESCALATED:
             raise ValueError(f"{case_id} is {case.state}; only cases waiting for review can be acted on")
         if action == "file":
@@ -273,6 +292,20 @@ class Runtime:
             self.remember(case)
         else:
             raise ValueError(f"unknown review action {action!r}")
+        if appealed:
+            if action == "file":
+                claim = self.followup.claims.get(case.claim_id) if case.claim_id else None
+                ref = f" Reference {claim.reference}." if claim and claim.reference else ""
+                self.inbox.post(case.merchant_id, "appeal.decided",
+                                f"Aapki appeal ({case_id}) maan li gayi: correction dobara file kar di gayi hai.{ref}",
+                                f"Your appeal ({case_id}) was accepted: the correction has been filed again.{ref}",
+                                case_id=case_id, outcome="filed")
+            else:
+                why = f" Wajah: {note}" if note else ""
+                self.inbox.post(case.merchant_id, "appeal.decided",
+                                f"Aapki appeal ({case_id}) dekhi gayi; faisla wahi raha.{why}",
+                                f"Your appeal ({case_id}) was reviewed; the outcome stands." + (f" Reason: {note}" if note else ""),
+                                case_id=case_id, outcome="upheld")
         return case
 
     def request_prevention(self, case: Case) -> None:

@@ -42,15 +42,18 @@ ALLOWED: dict[CaseState, frozenset[CaseState]] = {
     S.ESCALATED: frozenset({S.INVESTIGATING, S.CLOSED, S.ACTION_PENDING}),
     S.WITHDRAWN: frozenset(),
     S.RECOVERED: frozenset(),
-    S.CLOSED_UNRECOVERED: frozenset(),
+    S.CLOSED_UNRECOVERED: frozenset({S.ESCALATED}),   # only through a person's appeal
     S.CLOSED: frozenset(),
 }
 
-TERMINAL = frozenset(s for s, nxt in ALLOWED.items() if not nxt)
+# Where the agents stop on their own. CLOSED_UNRECOVERED is final for the agents; only a
+# person's appeal reopens it.
+TERMINAL = frozenset({S.WITHDRAWN, S.RECOVERED, S.CLOSED_UNRECOVERED, S.CLOSED})
 
 # Only a person may move a case out of the human queue. The agents cannot
 # overrule the proof gate; a reviewer can, and the log says so.
-HUMAN_ONLY = frozenset({(S.ESCALATED, S.ACTION_PENDING), (S.ESCALATED, S.CLOSED)})
+HUMAN_ONLY = frozenset({(S.ESCALATED, S.ACTION_PENDING), (S.ESCALATED, S.CLOSED),
+                        (S.CLOSED_UNRECOVERED, S.ESCALATED)})
 IN_FLIGHT = frozenset({S.FILED, S.WAITING, S.FOLLOW_UP, S.REJECTED, S.REPRESENT, S.AWAITING_CREDIT})
 
 

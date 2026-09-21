@@ -90,7 +90,8 @@ function describe(e) {
     case "workflow.withdraw": return [`Correction ${p.claim_id} withdrawn: ${p.reason}.`];
     case "settlement.delay.detected": return [`${p.payments} payments settled late (worst ${p.worst_days_late} banking days past the agreed date). Reported to settlement ops; no money is owed for a delay.`, "alert"];
     case "ticket.opened": return [`Merchant reported via chat: “${p.statement}”. Records showed nothing yet, so ticket ${p.ticket_id} went to the team.`, "alert"];
-    case "ticket.resolved": return [`Ticket ${p.ticket_id} resolved by ${p.resolved_by}.`];
+    case "ticket.resolved": return [`Ticket ${p.ticket_id} answered by ${p.resolved_by}; the reply went to the merchant's chat.`];
+    case "case.appealed": return [`${c}merchant appealed: “${p.reason}”. Waiting for an ops decision.`, "alert"];
     case "workflow.n8n.step": return [`n8n executed the ${p.action.replaceAll("_", "-")} step for ${p.claim_id}.`];
     case "pattern.recurred": return [`${c}the fix confirmed earlier did not hold: ${pattern(p.pattern).toLowerCase()} is back. Correction re-requested.`, "alert"];
     case "workflow.fallback": return [`n8n unreachable; the claim continues on the local workflow.`, "alert"];
@@ -441,11 +442,14 @@ async function renderActiveTab() {
     openDrawer(false);
     selectTab("cases");
   }));
-  el.querySelectorAll("[data-resolve]").forEach((btn) => btn.addEventListener("click", async () => {
+  el.querySelectorAll("[data-resolve]").forEach((btn) => btn.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    const text = btn.parentElement.querySelector("textarea")?.value.trim();
+    if (!text) { toast("Write the reply the merchant will see first."); return; }
     btn.disabled = true;
     await fetch(`/api/tickets/${btn.dataset.resolve}/resolve`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolved_by: "Settlement ops desk", resolution: "Checked with the merchant and the device team" }),
+      body: JSON.stringify({ resolved_by: "Settlement ops desk", resolution: text }),
     });
     await refreshAll();
   }));
@@ -529,21 +533,24 @@ const TABS = {
   async queue() {
     const [items, tickets] = await Promise.all([
       fetch("/api/human-queue").then((r) => r.json()), fetch("/api/tickets").then((r) => r.json())]);
+    const kind = { handoff: "Merchant asked for a person", appeal: "Merchant appeal" };
     const ticketHtml = tickets.map((t) => `<div class="card ticket">
-      <div class="card-row"><h3>Reported by the merchant via chat · ${esc(t.ticket_id)}</h3>
+      <div class="card-row"><h3>${esc(kind[t.topic] || "Reported by the merchant via chat")} · ${esc(t.ticket_id)}</h3>
         <span class="pill ${t.status === "OPEN" ? "NEEDS_HUMAN" : "RECOVERED"}">${t.status === "OPEN" ? "Open ticket" : "Resolved"}</span></div>
       <dl class="kv">
         <dt>Merchant said</dt><dd>“${esc(t.statement)}”</dd>
         <dt>Records showed</dt><dd>${esc(t.records_showed)}</dd>
-        ${t.resolution ? `<dt>Resolution</dt><dd>${esc(t.resolution)} (${esc(t.resolved_by)})</dd>` : ""}
+        ${t.transcript?.length ? `<dt>Conversation</dt><dd>${t.transcript.map((x) => `<div><b>${x.role === "assistant" ? "Assistant" : "Merchant"}:</b> ${esc(x.content)}</div>`).join("")}</dd>` : ""}
+        ${t.resolution ? `<dt>Reply sent</dt><dd>${esc(t.resolution)} (${esc(t.resolved_by)})</dd>` : ""}
       </dl>
-      ${t.status === "OPEN" ? `<div class="actions"><button class="btn btn-solid" data-resolve="${esc(t.ticket_id)}">Mark resolved</button></div>` : ""}
+      ${t.status === "OPEN" ? `<div class="reply-box"><textarea rows="2" maxlength="500" placeholder="Reply to the merchant (they see it in their chat)"></textarea>
+        <button class="btn btn-solid" data-resolve="${esc(t.ticket_id)}">Send reply and resolve</button></div>` : ""}
     </div>`).join("");
     if (!items.length && !tickets.length) return `<p class="empty">Nothing is waiting on a person for this merchant. Cases the teammate cannot prove land here instead of being filed.</p>`;
     if (!items.length) return ticketHtml;
     return ticketHtml + `<p class="note">The teammate did not file these. It could not prove them from published rules and the merchant's records, so it is asking a person. The merchant can decide these in their app too; whoever decides first is recorded by name, and the teammate then follows it through.</p>` +
       items.map((c) => `<div class="card" data-case="${c.case_id}" tabindex="0" style="cursor:pointer">
-      <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">Not filed</span></div>
+      <div class="card-row"><h3>${esc(pattern(c.pattern))} · ${c.month}</h3><span class="pill NEEDS_HUMAN">${c.escalation?.appeal ? "Merchant appeal" : "Not filed"}</span></div>
       <dl class="kv">
         <dt>Why it stopped</dt><dd>${esc(c.escalation?.reason)}</dd>
         <dt>What is missing</dt><dd>${esc((c.escalation?.missing || []).join("; ") || "—")}</dd>

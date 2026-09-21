@@ -96,7 +96,7 @@ Evaluation against hidden ground truth, the clean baseline and the red team:
 python evaluate.py --seed 42
 ```
 
-Tests (204, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
+Tests (211, about 2 minutes; the live n8n test is skipped unless `MFP_N8N_LIVE=1`):
 
 ```bash
 python -m pytest
@@ -149,6 +149,20 @@ teammate:
   shows its status; if the records do not show it, a ticket goes to Paytm's team
   with the merchant's words, and the chat says so instead of promising money.
   Tickets appear at the top of **Needs review** in the ops console.
+
+What else the merchant can do from the chat:
+
+- **Find a payment**: "8 Sep ka ₹2,113 ka payment kahan hai?" returns the payment
+  and whether it settled (batch, date, UTR, charges), arrived late, is not due
+  yet, failed, or is missing and under correction.
+- **See the proof**: "proof dikhao" (or tapping a case tag) shows the rule and its
+  source, the overcharge, an example of the recomputation, and the refund credit.
+- **Talk to a person**: the conversation so far is handed to Paytm's team as a
+  ticket; their reply arrives in the chat.
+- **Appeal** a case closed without recovery, with a reason; the ops desk decides
+  and the outcome arrives in the chat.
+- **Hear back without asking**: refunds landing in the bank (with UTR), replies
+  from the team, and appeal outcomes all arrive in the chat on their own.
 
 The command center's **Impact** tab shows the same merchant with and without the
 teammate: money lost, problems they would have had to find, lines to check by
@@ -271,5 +285,5 @@ src/mfp/demo/      demo director and HTTP API (presentation layer)
 ui/                command center (vanilla HTML/CSS/JS, no external assets)
 workflow/n8n/      n8n claim lifecycle workflow
 tools/             static firewall checker
-tests/             204 tests incl. firewall canaries and an offline rehearsal
+tests/             211 tests incl. firewall canaries and an offline rehearsal
 ```

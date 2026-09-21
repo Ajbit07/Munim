@@ -64,6 +64,11 @@ svg { display: block; }
 .impact-col.without h3, .impact-col.without .impact-big { color: var(--red); }
 .impact-col.with { background: var(--green-soft); }
 .impact-col.with h3, .impact-col.with .impact-big { color: var(--green); }
+.reply-box { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; flex-wrap: wrap; }
+.reply-box textarea {
+  flex: 1; min-width: 220px; border: 1.5px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px;
+  font: inherit; font-size: 14px; resize: vertical;
+}
 .review-confirm { flex: 1; background: var(--sky-soft); border-radius: var(--r-sm); padding: 12px; }
 .review-confirm p { margin: 0 0 8px; font-size: 14px; color: var(--navy); font-weight: 600; }
 .review-confirm input {

@@ -411,3 +411,86 @@ def test_decide_and_ticket_endpoints(loop_datasets, monkeypatch):
     assert client.get("/api/tickets").json() == []
     server._state.clear()
     server._assistants.clear()
+
+
+# -- merchant power: payment lookup, proof, a person, appeal, replies that come back --------------------
+
+
+def closed_case(rt):
+    """A case closed without recovery. The short test dataset has none (nothing is older than the
+    180-day window), so one is set up directly; the appeal path is what is under test."""
+    existing = [c for c in rt.cases.all(HERO) if c.state is CaseState.CLOSED_UNRECOVERED]
+    if existing:
+        return existing
+    case = next(c for c in rt.cases.all(HERO) if c.state is CaseState.RECOVERED)
+    case.state, case.recovered_paise, case.refund_credit = CaseState.CLOSED_UNRECOVERED, 0, None
+    return [case]
+
+
+def test_payment_lookup_finds_one_payment_by_amount_and_date(fresh):
+    from mfp.assistant.chat import parse_payment_query
+
+    assert parse_payment_query("08/09 wala 2113 ka payment kab aayega", 2026)[0] == {211300}
+    assert parse_payment_query("Settlement late kyun aaya?", 2026) is None
+    view = fresh.view(HERO)
+    settled = next(t for t in reversed(view.transactions) if str(t.kind) == "PAYMENT" and str(t.status) == "SUCCESS"
+                   and view.lines_by_txn.get(t.txn_id))
+    q = f"{settled.captured_at:%d %b} ka ₹{settled.amount_paise / 100:,.2f} ka payment kahan hai?"
+    r = MerchantAssistant(fresh, HERO, chain(local=FakeLocal("should not be used"))).reply(q, "hinglish")
+    assert r["topics"] == ["payment"] and r["source"] == "template"
+    match = next(p for p in r["payments"] if p["txn_id"] == settled.txn_id)
+    assert match["status"] in ("SETTLED", "LATE", "NOT_DUE") and (match["status"] == "NOT_DUE" or match["utr"])
+
+
+def test_proof_card_shows_rule_amount_and_refund_credit(fresh):
+    recovered = next(c for c in fresh.cases.all(HERO) if c.refund_credit)
+    r = MerchantAssistant(fresh, HERO, chain()).reply(f"{recovered.case_id} ka proof dikhao", "hinglish")
+    p = r["proof"]
+    assert p["case_id"] == recovered.case_id and p["verdict"] == "PROVEN" and p["rule"] and p["source"]
+    assert p["credit"]["utr"] == recovered.refund_credit["utr"] and inr(p["overcharge_paise"]) in r["reply"]
+
+
+def test_asking_for_a_person_hands_over_the_conversation_and_the_reply_comes_back(fresh):
+    a = MerchantAssistant(fresh, HERO, chain())
+    history = [{"role": "user", "content": "rental kyun kata"}, {"role": "assistant", "content": "₹995 wapas aaya"}]
+    r = a.reply("mujhe kisi insaan se baat karni hai", "hinglish", history)
+    ticket = r["ticket"]
+    assert ticket["topic"] == "handoff" and len(ticket["transcript"]) == 3
+    again = a.reply("koi insaan se baat karao", "hinglish")
+    assert again["ticket"]["ticket_id"] == ticket["ticket_id"], "no duplicate hand-offs"
+    cursor = fresh.inbox.latest_id()
+    fresh.tickets.resolve(ticket["ticket_id"], "Ops Priya", "Namaste, main Priya. Aapka rental wapas aa chuka hai.")
+    reply = fresh.inbox.since(HERO, cursor)[-1]
+    assert reply.kind == "ticket.reply" and "Priya" in reply.text_hi
+
+
+def test_refunds_landing_are_announced_in_the_chat(fresh):
+    credited = [m for m in fresh.inbox.since(HERO) if m.kind == "refund.credited"]
+    recovered = [c for c in fresh.cases.all(HERO) if c.refund_credit]
+    assert len(credited) == len(recovered) > 0
+    assert all(m.ref["utr"] and "UTR" in m.text_hi for m in credited)
+
+
+def test_a_merchant_can_appeal_a_closed_case_and_hears_the_outcome(fresh):
+    closed = closed_case(fresh)
+    a = MerchantAssistant(fresh, HERO, chain())
+    r = a.reply("main is faisle se sehmat nahi, appeal karna hai", "hinglish")
+    assert r["topics"] == ["appeal"] and {c["case_id"] for c in r["appealable"]} == {c.case_id for c in closed}
+    case = closed[0]
+    a.appeal(case.case_id, "Dispute window ke andar tha")
+    assert case.state is CaseState.ESCALATED and case.escalation["appeal"]
+    assert all(c["case_id"] != case.case_id for c in a.review_cards()), "appeals are the ops desk's decision"
+    cursor = fresh.inbox.latest_id()
+    fresh.review(case.case_id, "dismiss", "Settlement ops desk", "Window 180 din ka hai")
+    outcome = fresh.inbox.since(HERO, cursor)[-1]
+    assert outcome.kind == "appeal.decided" and outcome.ref["outcome"] == "upheld"
+
+
+def test_only_a_person_can_reopen_a_closed_case(fresh):
+    from mfp.cases.state_machine import IllegalTransition
+
+    closed = closed_case(fresh)[0]
+    from mfp.core.enums import Actor
+
+    with pytest.raises(IllegalTransition):
+        fresh.state_machine.transition(closed, CaseState.ESCALATED, Actor.FOLLOWUP_AGENT, "agent reopening")

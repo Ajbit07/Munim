@@ -33,6 +33,7 @@ import time
 import unicodedata
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -147,6 +148,12 @@ TOPIC_PATTERNS = {
 }
 
 KEYWORDS = [  # order is priority
+    ("handoff", ("insaan", "human", "kisi se baat", "customer care", "support team", "agent se", "real person",
+                 "call karo", "call me", "baat karni", "talk to someone", "talk to a person", "इंसान", "किसी से बात")),
+    ("appeal", ("appeal", "sehmat nahi", "disagree", "galat faisla", "dobara check", "reconsider", "not fair",
+                "unfair", "reopen", "फिर से देखो")),
+    ("proof", ("proof", "saboot", "sabut", "utr", "evidence", "kaise pata", "how do you know", "reference number",
+               "prove", "सबूत")),
     ("rental", ("rental", "rent", "soundbox", "sound box", "device", "machine", "kiraya", "199", "edc", "pos")),
     ("late", ("late", "delay", "der ", "der?", "der se", "dheere", "kab aay", "kab milega", "pending", "nahi aaya",
               "not received", "t+1", "slow")),
@@ -223,6 +230,48 @@ def review_reason(case, hinglish: bool) -> str:
                 if hinglish else "Settlement ops said no and we cannot answer it ourselves. You can file it again.")
     return ("Hum ise khud prove nahi kar sake, isliye faisla aapka hai." if hinglish else
             "We could not prove this ourselves, so the decision is yours.")
+
+
+MONTHS = {m: i for i, names in enumerate(
+    (("jan", "january", "जनवरी"), ("feb", "february", "फरवरी"), ("mar", "march", "मार्च"), ("apr", "april", "अप्रैल"),
+     ("may", "मई"), ("jun", "june", "जून"), ("jul", "july", "जुलाई"), ("aug", "august", "अगस्त"),
+     ("sep", "sept", "september", "सितंबर"), ("oct", "october", "अक्टूबर"), ("nov", "november", "नवंबर"),
+     ("dec", "december", "दिसंबर")), start=1) for m in names}
+PAYMENT_WORDS = ("payment", "transaction", "txn", "paisa", "paise", "kahan", "kab", "where", "status", "aaya",
+                 "mila", "settle", "पेमेंट", "कहाँ", "कब")
+
+
+def parse_payment_query(question: str, year: int) -> tuple[set[int], date | None] | None:
+    """Amounts (in paise) and a date the merchant mentions when asking about one payment, or None."""
+    q = _ascii_digits(question.lower())
+    day = None
+    spans = []  # where the date was written, so its digits are not read as an amount
+    for m in re.finditer(r"\b(\d{1,2})\s*(?:st|nd|rd|th)?\s*([a-z\u0900-\u097f]+)", q):
+        if m.group(2) in MONTHS:
+            spans.append(m.span())
+            if day is None:
+                try:
+                    day = date(year, MONTHS[m.group(2)], int(m.group(1)))
+                except ValueError:
+                    day = None
+    if day is None:
+        m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", q)
+        if m:
+            spans.append(m.span())
+            try:
+                day = date(year, int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                day = None
+    amounts = {int(a * 100) for a in amounts_in(q)}
+    if not amounts:
+        stripped = q
+        for a, b in sorted(spans, reverse=True):
+            stripped = stripped[:a] + " " + stripped[b:]
+        amounts = {int(Decimal(x.replace(",", "")) * 100) for x in re.findall(r"\b\d[\d,]*(?:\.\d{1,2})?\b", stripped)
+                   if Decimal(x.replace(",", "")) >= 10}
+    if not (amounts or day) or not any(w in q for w in PAYMENT_WORDS):
+        return None
+    return amounts, day
 
 
 SENSITIVE = ("otp", "pin", "password", "cvv", "upi pin", "bank account number", "card number")
@@ -390,6 +439,7 @@ def reply_problem(reply: str, draft: str, language: str) -> str | None:
 @dataclass
 class Facts:
     ticket: dict[str, Any] | None = None                     # opened when a reported issue is not in the records
+    cards: dict[str, Any] = field(default_factory=dict)      # payments, proof, appealable: shown as cards
     lines: list[str] = field(default_factory=list)          # English, for the model
     draft_en: list[str] = field(default_factory=list)
     draft_hi: list[str] = field(default_factory=list)       # Hinglish
@@ -458,6 +508,12 @@ class MerchantAssistant:
                     "Paytm will never ask for your OTP, PIN, password or CVV. Please do not share them with anyone.")
             return self._out(text, language, "safety", ["safety"], Facts(), started, None, "keywords")
         topics, understood_by = (topics_override, "paytm") if topics_override else (_topics(question), "keywords")
+        if not topics_override and topics[0] not in ("handoff", "appeal", "proof") and parse_payment_query(
+                question, self.rt.clock.today().year):
+            topics = ["payment"]
+        if topics[0] in ("handoff", "appeal", "proof", "payment"):
+            topics = topics[:1]  # an explicit request is answered on its own
+        self._question, self._history = question, history or []
         if not topics_override and topics == ["summary"] and len(question) > 3:
             classified = self._classify(question)
             if classified:
@@ -476,9 +532,12 @@ class MerchantAssistant:
         grounding = " ".join(facts.lines) + " " + draft + " " + question
         require = topics[0] not in ("greet",)
         writers = []
-        if sarvam.client.configured:
+        exact = topics[0] in ("payment", "proof", "handoff", "appeal")
+        if exact:
+            pass  # records and hand-offs are shown exactly; a model adds nothing but risk
+        elif sarvam.client.configured:
             writers.append((sarvam, history))
-        if local_writes_enabled() and local.available():
+        if not exact and local_writes_enabled() and local.available():
             writers.append((local, (history or [])[-4:]))  # a small model follows a short history better
         for writer, turns in writers:
             try:
@@ -507,6 +566,9 @@ class MerchantAssistant:
         out = self._out(text, language, source, topics, facts, started, note, understood_by)
         if facts.ticket:
             out["ticket"] = facts.ticket
+        for key in ("payments", "proof", "appealable"):
+            if facts.cards.get(key) is not None:
+                out[key] = facts.cards[key]
         if topics[0] in ("review", "proactive") or ("review" in topics):
             out["actions"] = self.review_cards(language)
         return out
@@ -517,7 +579,8 @@ class MerchantAssistant:
         """Every case waiting for this merchant, as a card with the two decisions they can make."""
         hinglish = language in ("hinglish", "hi-IN", "auto")
         with self.lock:
-            waiting = self.rt.cases.in_state(CaseState.ESCALATED, merchant_id=self.merchant_id)
+            waiting = [c for c in self.rt.cases.in_state(CaseState.ESCALATED, merchant_id=self.merchant_id)
+                       if not (c.escalation or {}).get("appeal")]
             cards = []
             for c in sorted(waiting, key=lambda c: -(c.proof.discrepancy_paise if c.proof else 0)):
                 amount = c.proof.discrepancy_paise if c.proof else (c.escalation or {}).get("disputed_paise", 0)
@@ -531,6 +594,21 @@ class MerchantAssistant:
                     ],
                 })
         return cards
+
+    def appeal(self, case_id: str, reason: str, language: str = "hinglish") -> dict[str, Any]:
+        """The merchant disputes a case closed without recovery; the ops desk decides and replies here."""
+        hinglish = language in ("hinglish", "hi-IN", "auto")
+        with self.lock:
+            case = self.rt.cases.get(case_id)
+            if case.merchant_id != self.merchant_id:
+                raise KeyError(case_id)
+            merchant = self.rt.dataset.merchant(self.merchant_id).legal_name
+            self.rt.appeal(case_id, reason, by=f"{merchant} (merchant, via chat)")
+        text = (f"Aapki appeal ({case_id}) Paytm ki settlement team ko bhej di. Woh aapki baat dekhkar yahin faisla "
+                "batayenge." if hinglish else
+                f"Your appeal ({case_id}) has gone to Paytm's settlement team. They will review it and reply here.")
+        return {"reply": text, "language": language, "source": "paytm", "case_id": case_id, "note": None,
+                "cases": [], "topics": ["appeal"], "suggestions": SUGGESTIONS["summary"]}
 
     def decide(self, case_id: str, action: str, language: str = "hinglish") -> dict[str, Any]:
         """The merchant's decision on a review case, recorded with their name, then carried out."""
@@ -724,7 +802,7 @@ class MerchantAssistant:
             return f
 
         case_match = re.search(r"case[-\s]?0*(\d+)", question, re.IGNORECASE)
-        if case_match:
+        if case_match and topics[0] != "proof":
             self._case_facts(f, f"CASE-{int(case_match.group(1)):05d}")
         for topic in topics:
             getattr(self, f"_topic_{topic}", self._topic_summary)(f, m)
@@ -750,6 +828,154 @@ class MerchantAssistant:
         groups = self._groups(set().union(*TOPIC_PATTERNS.values()))
         for pattern, g in sorted(groups.items(), key=lambda kv: -kv[1]["amount"])[:4]:
             f.lines.append(self._group_line(f, pattern, g))
+
+    # -- payment lookup ------------------------------------------------------------------------
+
+    def _topic_payment(self, f: Facts, m: dict) -> None:
+        rt = self.rt
+        parsed = parse_payment_query(self._question, rt.clock.today().year) or (set(), None)
+        amounts, day = parsed
+        view = rt.view(self.merchant_id)
+        today = rt.observed_through()
+        late = {b.txn_id: b for b in rt.sla_breaches.get(self.merchant_id, [])}
+        pool = [t for t in view.transactions if str(t.kind) == "PAYMENT"]
+        if day is not None:
+            pool = [t for t in pool if abs((t.captured_at.date() - day).days) <= 1]
+        if amounts:
+            pool = [t for t in pool if any(abs(t.amount_paise - a) < 100 for a in amounts)]
+        pool = sorted(pool, key=lambda t: t.captured_at, reverse=True)[:3]
+        cards = []
+        for t in pool:
+            card = {"txn_id": t.txn_id, "amount_paise": t.amount_paise, "instrument": str(t.instrument),
+                    "captured_at": t.captured_at.isoformat()}
+            f.paise.add(t.amount_paise)
+            line = next((ln for ln in view.lines_by_txn.get(t.txn_id, []) if str(ln.line_type) == "PAYMENT"), None)
+            batch = view.batches_by_id.get(line.batch_id) if line else None
+            if str(t.status) != "SUCCESS":
+                card.update(status="FAILED", en="This payment failed, so nothing was charged or settled.",
+                            hi="Yeh payment fail hua tha, isliye na paisa kata na settle hua.")
+            elif batch is not None and batch.settlement_date <= today:
+                f.paise.add(line.net_paise)
+                card.update(status="LATE" if t.txn_id in late else "SETTLED", batch_id=batch.batch_id,
+                            settled_on=batch.settlement_date.isoformat(), utr=batch.utr, net_paise=line.net_paise,
+                            deductions_paise=line.gross_paise - line.net_paise)
+                when = f"{batch.settlement_date:%d %b}"
+                lag = f" ({late[t.txn_id].banking_days_late} banking days late; reported to the settlement team)" \
+                    if t.txn_id in late else ""
+                lag_hi = f" ({late[t.txn_id].banking_days_late} banking din der se; settlement team ko report kiya)" \
+                    if t.txn_id in late else ""
+                card.update(en=f"Settled on {when} in {batch.batch_id}: {inr(line.net_paise)} reached your bank "
+                               f"(UTR {batch.utr}) after {inr(line.gross_paise - line.net_paise)} of charges{lag}.",
+                            hi=f"{when} ko {batch.batch_id} mein settle hua: {inr(line.net_paise)} aapke bank mein aaya "
+                               f"(UTR {batch.utr}), charges {inr(line.gross_paise - line.net_paise)}{lag_hi}.")
+            else:
+                due = rt.recon.deadline(view, t.captured_at)
+                case = next((c for c in rt.cases.all(self.merchant_id) if t.txn_id in c.txn_ids
+                             and c.component == "SETTLEMENT"), None)
+                if due >= today and case is None:
+                    card.update(status="NOT_DUE", due=due.isoformat(),
+                                en=f"Not settled yet, and not late: it is due by {due:%d %b}.",
+                                hi=f"Abhi settle nahi hua, par late bhi nahi: {due:%d %b} tak aana chahiye.")
+                else:
+                    state = str(case.state).replace("_", " ").lower() if case else "being checked"
+                    card.update(status="MISSING", case_id=case.case_id if case else None,
+                                en=f"It never reached a settlement. It is part of correction {case.case_id if case else ''} "
+                                   f"({state}).", hi=f"Yeh kisi settlement mein nahi aaya. Iski correction "
+                                   f"{case.case_id if case else ''} chal rahi hai ({state}).")
+            cards.append(card)
+        f.cards["payments"] = cards
+        when = f"{day:%d %b} " if day else ""
+        amt = f"{inr(min(amounts))} " if amounts else ""
+        f.lines.append(f"Payment lookup for {when}{amt}: {len(cards)} match(es).")
+        if not cards:
+            f.draft_en.append(f"I could not find a {amt}payment {('on ' + when) if when else ''}in your records. Please "
+                              "check the amount or the date and ask again.")
+            f.draft_hi.append(f"Mujhe {when}{amt}ka koi payment nahi mila. Amount ya date check karke dobara poochiye.")
+        elif len(cards) == 1:
+            c = cards[0]
+            f.draft_en.append(f"Your {inr(c['amount_paise'])} payment from {c['captured_at'][:10]}: {c['en']}")
+            f.draft_hi.append(f"Aapka {inr(c['amount_paise'])} ka payment ({c['captured_at'][:10]}): {c['hi']}")
+        else:
+            f.draft_en.append(f"I found {len(cards)} payments that match. Each one is below with its status.")
+            f.draft_hi.append(f"Mujhe {len(cards)} milte-julte payment mile. Har ek ka status neeche hai.")
+
+    # -- proof ---------------------------------------------------------------------------------------
+
+    def _topic_proof(self, f: Facts, m: dict) -> None:
+        from mfp.runtime.views import case_detail
+
+        rt = self.rt
+        match = re.search(r"case[-\s]?0*(\d+)", self._question, re.IGNORECASE)
+        mine = [c for c in rt.cases.all(self.merchant_id) if c.proof is not None]
+        case = None
+        if match:
+            case = next((c for c in mine if c.case_id == f"CASE-{int(match.group(1)):05d}"), None)
+        if case is None:
+            case = next((c for c in sorted(mine, key=lambda c: c.case_id, reverse=True) if c.refund_credit), None) \
+                or next((c for c in mine if c.proof.authorises_claim), None)
+        if case is None:
+            f.draft_en.append("There is no proven correction on your account yet, so there is no proof to show.")
+            f.draft_hi.append("Aapke account par abhi koi proven correction nahi hai, isliye dikhane ko proof nahi hai.")
+            return
+        d = case_detail(rt, case.case_id)
+        rule = (d["rules"] or [{}])[0]
+        proof = d["proof"]
+        credit = d.get("refund_credit")
+        f.paise |= {proof["discrepancy_paise"], case.recovered_paise}
+        f.cards["proof"] = {
+            "case_id": case.case_id, "month": case.month, "title": SHORT_TITLE.get(case.pattern, (case.pattern,))[0],
+            "payments": len(case.txn_ids), "overcharge_paise": proof["discrepancy_paise"],
+            "verdict": proof["verdict"], "rule": rule.get("name"), "source": rule.get("source"),
+            "example": (proof["computation"][0]["expression"] if proof["computation"] else None),
+            "records": proof["records"], "reference": (d.get("claim") or {}).get("reference"),
+            "state": str(case.state), "credit": credit,
+        }
+        paid = (f" {inr(case.recovered_paise)} came back on {credit['settlement_date']} (UTR {credit['utr']})."
+                if credit else f" Status: {str(case.state).replace('_', ' ').lower()}.")
+        paid_hi = (f" {inr(case.recovered_paise)} {credit['settlement_date']} ko wapas aaya (UTR {credit['utr']})."
+                   if credit else f" Status: {str(case.state).replace('_', ' ').lower()}.")
+        f.draft_en.append(f"Here is the proof for {case.case_id}: {len(case.txn_ids)} payments in {case.month} were "
+                          f"overcharged by {inr(proof['discrepancy_paise'])}, recomputed from {rule.get('name')}."
+                          f"{paid}")
+        f.draft_hi.append(f"{case.case_id} ka proof: {case.month} mein {len(case.txn_ids)} payments par "
+                          f"{inr(proof['discrepancy_paise'])} zyada kata, {rule.get('name')} ke hisaab se dobara "
+                          f"calculate karke.{paid_hi}")
+
+    # -- talk to a person ---------------------------------------------------------------------------------
+
+    def _topic_handoff(self, f: Facts, m: dict) -> None:
+        existing = self.rt.tickets.open_for(self.merchant_id, "handoff")
+        if existing is not None:
+            f.ticket = existing.summary()
+            f.draft_en.append(f"You are already with our team on ticket {existing.ticket_id}. They will reply here.")
+            f.draft_hi.append(f"Aapki baat pehle se hamari team ke paas hai (ticket {existing.ticket_id}). Woh yahin jawab denge.")
+            return
+        ticket = self.rt.tickets.open(self.merchant_id, "handoff", self._question,
+                                      "The merchant asked to talk to a person.",
+                                      transcript=[*self._history, {"role": "user", "content": self._question}])
+        f.ticket = ticket.summary()
+        f.draft_en.append(f"I have passed our conversation to Paytm's settlement team (ticket {ticket.ticket_id}). "
+                          "A person will reply in this chat.")
+        f.draft_hi.append(f"Maine hamari baatcheet Paytm ki settlement team ko de di hai (ticket {ticket.ticket_id}). "
+                          "Ek insaan isi chat mein jawab dega.")
+
+    # -- appeal -------------------------------------------------------------------------------------------
+
+    def _topic_appeal(self, f: Facts, m: dict) -> None:
+        closed = [c for c in self.rt.cases.all(self.merchant_id) if c.state is CaseState.CLOSED_UNRECOVERED]
+        f.cards["appealable"] = [{
+            "case_id": c.case_id, "month": c.month, "title": SHORT_TITLE.get(c.pattern, (c.pattern,))[0],
+            "amount_paise": c.proof.discrepancy_paise if c.proof else c.detected_paise,
+            "why_closed": next((t.reason for t in reversed(c.history) if t.to_state == "REJECTED"), "Closed without recovery"),
+        } for c in closed]
+        if not closed:
+            f.draft_en.append("None of your cases was closed without recovery, so there is nothing to appeal.")
+            f.draft_hi.append("Aapka koi case bina paisa wapas aaye band nahi hua, isliye appeal karne ko kuch nahi hai.")
+            return
+        f.draft_en.append(f"{len(closed)} case(s) closed without recovery. Pick one below and tell us why you "
+                          "disagree; Paytm's team will decide and reply here.")
+        f.draft_hi.append(f"{len(closed)} case bina paisa wapas aaye band hue. Neeche case chuniye aur batayiye aap "
+                          "kyun sehmat nahi; Paytm team faisla karke yahin batayegi.")
 
     def _open_ticket(self, f: Facts, topic: str, question: str) -> None:
         """The merchant reports something the records do not show: hand it to people, and say so."""
