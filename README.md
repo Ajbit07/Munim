@@ -356,7 +356,7 @@ network in your firewall. `docker compose down` stops n8n.
 | [docs/FEE_RULES.md](docs/FEE_RULES.md) | Every rate, its source, effective date, confidence and open questions |
 | [docs/DATA.md](docs/DATA.md) | The synthetic merchant environment and declared simplifications |
 | [docs/DEMO.md](docs/DEMO.md) | The exact live demo sequence |
-| [docs/MISSES.md](docs/MISSES.md) | Evaluation results, every miss, known limitations |
+| [docs/MISSES.md](docs/MISSES.md) | Evaluation results, every miss, known limitations 
 
 ## Repository
 
