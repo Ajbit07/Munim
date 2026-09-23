@@ -436,6 +436,9 @@ async function boot() {
     const first = s.merchant.split(/\s+/)[0];
     if (s.connected) {
       await paytmSpeaksFirst();
+      // Deep link for demos and slides: ?ask=... asks each question in turn once Munim has spoken.
+      for (const q of new URLSearchParams(location.search).getAll("ask")) await send(q);
+      if (new URLSearchParams(location.search).get("view") === "top") $("thread").scrollTop = 0;
     } else {
       addBot(`Namaste ${first} ji! Main Munim hoon, aapke settlements ka hisaab rakhta hoon. Abhi check shuru nahi hua; jaise hi hoga, yahin bataunga.`);
       setChips(s.suggestions);

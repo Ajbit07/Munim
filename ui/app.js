@@ -593,7 +593,7 @@ const TABS = {
     return `<p class="note">Same merchant, same twelve months. Every figure below is computed from the audit; nothing is estimated by hand.</p>
       <div class="impact">
         <section class="impact-col without">
-          <h3>Without the teammate</h3>
+          <h3>Without Munim</h3>
           <div class="impact-big">${rupees(d.identified_paise)}</div>
           <p>deducted in error and never noticed</p>
           <ul>
@@ -604,7 +604,7 @@ const TABS = {
           </ul>
         </section>
         <section class="impact-col with">
-          <h3>With the teammate</h3>
+          <h3>With Munim</h3>
           <div class="impact-big">${rupees(d.recovered_paise)}</div>
           <p>already back in the merchant's account</p>
           <ul>
@@ -946,4 +946,9 @@ $("btn-auto").addEventListener("click", async () => {
   $("btn-auto").textContent = "Play the tour";
 });
 
-loadMerchants().then(refreshAll).then(refreshDatasets);
+// Deep links for demos and slides: ?tab=impact opens a tab, ?case=CASE-00023 opens a case.
+const LINK = new URLSearchParams(location.search);
+loadMerchants().then(refreshAll).then(refreshDatasets).then(async () => {
+  if (LINK.get("tab") && TABS[LINK.get("tab")]) await selectTab(LINK.get("tab"));
+  if (LINK.get("case")) await openCase(LINK.get("case"));
+});
