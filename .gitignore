@@ -7,3 +7,4 @@ data/generated/
 reports/*.json
 data/uploads/
 samples/*.csv
+.claude/
