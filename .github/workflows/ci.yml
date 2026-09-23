@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests on Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Tests
+        run: python -m pytest
+
+      - name: Firewalls (proof independence, ground-truth isolation, no wall clock)
+        run: python tools/check_firewall.py
+
+      - name: The full story, headless, on a small dataset
+        run: |
+          python generate.py --seed 7 --merchants 3 --months 2
+          python generate.py --seed 7 --merchants 3 --months 2 --no-leakage
+          python demo.py --seed 7
+
+  evaluation:
+    name: Evaluation against hidden ground truth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Generate the dataset and its clean baseline
+        run: |
+          python generate.py --seed 42
+          python generate.py --seed 42 --no-leakage
+
+      - name: Dataset checks that need the full seed-42 data
+        run: python -m pytest tests/test_generator.py -rs
+
+      - name: Evaluate
+        run: python evaluate.py --seed 42
+
+      - name: Keep the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-seed-42
+          path: reports/
+          if-no-files-found: warn
+
+  image:
+    name: Docker image
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: munim:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start the container and wait for the console
+        run: |
+          docker run -d --name munim -p 8000:8000 \
+            -e MFP_SEED=7 -e MFP_GENERATE_ARGS="--merchants 3 --months 2" munim:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/portfolio > /dev/null; then
+              echo "console answered after ${i}s"; break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8000/api/portfolio > /dev/null
+          curl -fsS http://localhost:8000/ > /dev/null
+          curl -fsS http://localhost:8000/chat > /dev/null
+
+      - name: Container logs
+        if: always()
+        run: docker logs munim
+
+      - name: Stop
+        if: always()
+        run: docker rm -f munim
+
+      # Continuous delivery: the image is published only from the default branch.
+      - name: Log in to the registry
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

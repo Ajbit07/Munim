@@ -1,15 +1,39 @@
-# n8n executes the claim lifecycle steps. The MFP API (python serve.py) runs on the host.
-#   docker compose up -d
-#   docker compose exec n8n n8n import:workflow --input=/workflows/claim_lifecycle.json
-#   docker compose exec n8n n8n publish:workflow --id=mfpClaimLifecyc && docker compose restart n8n
-#   MFP_WORKFLOW=n8n python serve.py --host 0.0.0.0     (see README: n8n calls back into the API)
+# Munim, and the services it can use when they are around.
+#
+#   docker compose up --build              ops console on http://localhost:8000, chat on /chat
+#   docker compose run --rm munim demo     the twelve-step story in the terminal
+#   docker compose run --rm munim test     the test suite inside the image
+#   docker compose --profile n8n up -d     add n8n for the claim lifecycle
+#   docker compose --profile local-llm up  add Ollama for the offline chat model
+#
+# With no profile, only Munim runs and it needs no network at all.
 services:
+  munim:
+    build: .
+    image: munim:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - MFP_SEED=${MFP_SEED:-42}
+      # Set MFP_WORKFLOW=n8n to hand the claim lifecycle to the n8n service below.
+      - MFP_WORKFLOW=${MFP_WORKFLOW:-}
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/mfp-claim-lifecycle
+      # The chat uses Sarvam when a key is present, then the local model, then the checked answer.
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      - MFP_OLLAMA_URL=${MFP_OLLAMA_URL:-http://ollama:11434}
+    volumes:
+      # Generated datasets and uploaded reports survive a restart.
+      - munim_data:/app/data
+    restart: unless-stopped
+
   n8n:
     image: n8nio/n8n:latest
+    profiles: ["n8n"]
     ports:
       - "5678:5678"
     environment:
-      - MFP_API_URL=http://host.docker.internal:8000
+      # n8n calls back into Munim. Use http://host.docker.internal:8000 when the API runs on the host.
+      - MFP_API_URL=${MFP_API_URL:-http://munim:8000}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - GENERIC_TIMEZONE=Asia/Kolkata
     extra_hosts:
@@ -17,5 +41,22 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - ./workflow/n8n:/workflows:ro
+    # After the first start, import and publish the workflow:
+    #   docker compose exec n8n n8n import:workflow --input=/workflows/claim_lifecycle.json
+    #   docker compose exec n8n n8n publish:workflow --id=mfpClaimLifecyc
+    #   docker compose restart n8n
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Pull the model once it is up:
+    #   docker compose exec ollama ollama pull gemma3:4b
+
 volumes:
+  munim_data:
   n8n_data:
+  ollama_data:

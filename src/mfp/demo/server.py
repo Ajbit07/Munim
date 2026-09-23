@@ -38,10 +38,13 @@ _lock = threading.RLock()
 _state: dict[str, DemoDirector] = {}
 
 
+START_SEED = int(os.environ.get("MFP_SEED", "42"))   # the dataset the console opens on
+
+
 def director() -> DemoDirector:
     with _lock:
         if "d" not in _state:
-            _state["d"] = DemoDirector()
+            _state["d"] = DemoDirector(seed=START_SEED)
         return _state["d"]
 
 
@@ -105,7 +108,7 @@ def demo_next() -> dict[str, Any]:
 @app.post("/api/demo/reset")
 def demo_reset() -> dict[str, Any]:
     with _lock:
-        seed = _state["d"].seed if "d" in _state else 42
+        seed = _state["d"].seed if "d" in _state else START_SEED
         _state["d"] = DemoDirector(seed=seed)
         _assistants.clear()
         return _state_payload(_state["d"])

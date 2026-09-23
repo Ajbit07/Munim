@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.pytest_cache
+**/__pycache__
+*.pyc
+*.egg-info
+data/generated
+data/uploads
+reports/*.json
+samples/*.csv
+docs
+scratchpad
+*.pptx
+*.pdf
+.env

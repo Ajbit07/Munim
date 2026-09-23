@@ -111,6 +111,60 @@ Firewalls (proof independence, ground-truth isolation, no wall clock):
 python tools/check_firewall.py
 ```
 
+### Run it in Docker
+
+One container holds the API, the agents, the ops console and the merchant
+chat. On first start it generates its own dataset (about 35 seconds) and keeps
+it in a volume, so later starts are instant. It needs no network at run time.
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:8000 (ops console) and http://localhost:8000/chat
+(merchant chat). The same image runs everything else:
+
+```bash
+docker compose run --rm munim demo
+```
+
+```bash
+docker compose run --rm munim evaluate
+```
+
+```bash
+docker compose run --rm munim test
+```
+
+n8n and the local model are opt-in profiles. With neither, only Munim runs:
+
+```bash
+MFP_WORKFLOW=n8n docker compose --profile n8n up -d
+```
+
+```bash
+docker compose --profile local-llm up -d
+```
+
+```bash
+docker compose exec ollama ollama pull gemma3:4b
+```
+
+A Sarvam key is read from the environment (`SARVAM_API_KEY=... docker compose up`).
+
+### CI/CD
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+| Job | What it checks |
+|---|---|
+| Tests | the test suite on Python 3.12 and 3.13, the firewall checks, and the twelve-step story headless on a small dataset |
+| Evaluation | the full seed-42 dataset and its clean baseline against hidden ground truth; the report is kept as a build artifact |
+| Docker image | builds the image, starts it, and waits until the console, `/chat` and the API answer |
+
+When all of that passes on the default branch, the image is published to the
+GitHub Container Registry as `ghcr.io/<owner>/<repo>:latest` and `:<commit sha>`.
+
 ### Optional integrations
 
 Each has a local fallback, and the demo never depends on it.
@@ -241,8 +295,11 @@ ollama pull gemma3:4b
 
 #### Running with n8n
 
+To run both in containers, see [Run it in Docker](#run-it-in-docker). To keep
+the API on the host and only n8n in Docker:
+
 ```bash
-docker compose up -d
+MFP_API_URL=http://host.docker.internal:8000 docker compose --profile n8n up -d n8n
 ```
 
 ```bash
